@@ -144,35 +144,44 @@ class Net:
         maxC = np.absolute(self.connections).max()
         markerSize = 10
         markerRadius = np.sqrt(markerSize)/20
-        plt.axes().set_aspect(1)
-        plt.scatter(x, y, s=markerSize)
-        arrowStyle = "Simple, tail_width=0.5, head_width=4, head_length=8"
+        ax = plt.axes()
+#        ax.set_aspect(1)
+        ax.scatter(x, y, s=markerSize)
+        ars = patches.ArrowStyle.Simple(tail_width=0.5, head_width=4, head_length=8)
+        cs = patches.ConnectionStyle.Arc3(rad=4)
         for k in range(self.numNeurons):
             for j in range(self.numNeurons):
-                p1 = np.array([x[k], y[k]])
-                p2 = np.array([x[j], y[j]])
-                dir = p2 - p1
-                dirHat = dir / np.linalg.norm(dir)
-                dir2Hat = dirHat.dot(Net.rotation)
-                sideOffset = markerRadius * dir2Hat
-                forwardOffset = markerRadius * dirHat
-                p1 = p1 + sideOffset + forwardOffset
-                p2 = p2 + sideOffset - forwardOffset
                 c = self.connections[k][j] / maxC
                 if c > 0:
                     color = np.array([0, 1, 0])
                 else:
                     color = np.array([1, 0, 0])
                 brightness = abs(c)
+
+                p1 = np.array([x[k], y[k]])
+                p2 = np.array([x[j], y[j]])
+
                 if k == j:
                     # Autapse
-                    self.connectionArrows[k][j] = patches.FancyArrowPatch(p1, p2, arrowstyle=arrowStyle, color=color, alpha=brightness, connectionstyle="arc3,rad={r}".format(r=markerRadius*5))
+                    dirHat= p1/np.linalg.norm(p1)
+                    dir2Hat = dirHat.dot(Net.rotation)
+                    sideOffset = markerRadius * dir2Hat
+                    p1 = p1 + sideOffset
+                    p2 = p2 - sideOffset
+                    self.connectionArrows[k][j] = patches.FancyArrowPatch(p1, p2, arrowstyle=ars, color=color, alpha=brightness, connectionstyle=cs)
 #                    self.connectionArrows[k][j] = plt.arrow(p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1], color=color, alpha=brightness, head_width=0.1)
                 else:
                     # Synapse
-                    self.connectionArrows[k][j] = patches.FancyArrowPatch(p1, p2, arrowstyle=arrowStyle, color=color, alpha=brightness)
+                    dir = p2 - p1
+                    dirHat = dir / np.linalg.norm(dir)
+                    dir2Hat = dirHat.dot(Net.rotation)
+                    sideOffset = markerRadius * dir2Hat
+                    forwardOffset = markerRadius * dirHat
+                    p1 = p1 + sideOffset + forwardOffset
+                    p2 = p2 + sideOffset - forwardOffset
+                    self.connectionArrows[k][j] = patches.FancyArrowPatch(p1, p2, arrowstyle=ars, color=color, alpha=brightness)
 #                    self.connectionArrows[k][j] = plt.arrow(p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1], color=color, alpha=brightness, head_width=0.1)
-                plt.gca().add_patch(self.connectionArrows[k][j])
+                ax.add_patch(self.connectionArrows[k][j])
         plt.show()
 
     def run(self, iters, visualize=True):
@@ -212,7 +221,7 @@ class Neuron:
         self.net.activations[self.index] = activation
 
 if __name__ == "__main__":
-    N = 10
+    N = 50
     n = Net(N)
     n.randomizeConnections(N*N, 0, 2)
     print(n.connections)
