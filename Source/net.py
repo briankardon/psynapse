@@ -18,10 +18,12 @@ class Net:
         #       patterns
         self.historyLength = historyLength
         self.numNeurons = numNeurons
-        self.connections = np.zeros([self.numNeurons, self.numNeurons])
+        self.connections = np.zeros([self.numNeurons, self.numNeurons])   # Direct excitatory/inhibitory connection matrix
+        self.modConnections = np.zeros([self.numNeurons, self.numNeurons])  # Modulatory connection matrix
         self.neurons = [Neuron(self, k) for k in range(self.numNeurons)]
         self.activations = np.zeros(self.numNeurons)
         self.history = np.zeros([self.numNeurons, self.historyLength])
+        self.baseThresholds = np.ones(self.numNeurons)
         self.thresholds = np.ones(self.numNeurons)
         self.refractoryPeriods = np.round(np.random.normal(loc=refractoryPeriodMean, scale=refractoryPeriodSigma, size=self.numNeurons))
         self.refractoryCountdowns = np.zeros(self.numNeurons)
@@ -33,16 +35,20 @@ class Net:
         self.attributeNames = []
         self.attributeValues = np.zeros([0, self.numNeurons])
 
-    def addAttributes(self, name, initialValues=None):
+    def addAttributes(self, name, indices=None, initialValues=None):
         # name = string, name of new attribute
         # initialValues = list of initial values, or None to initialize with all
         #   zeros. If a list, it must have length equal to numNeurons
         if name in self.attributeNames:
             KeyError('Attribute "{n}" already exists.'.format(n=name))
+        if indices is None:
+            indices = np.s_[:]
         self.attributeNames.append(name)
         self.attributeValues = np.pad(self.attributeValues, ([0, 1], [0, 0]))
         if initialValues is not None:
-            self.attributeValues[-1, :] = initialValues
+            self.attributeValues[-1, indices] = initialValues
+        # Return the index of the new attribute
+        return self.attributeValues.shape[0] - 1
 
     def removeAttributes(self, name):
         # Deletes the specified attribute.
@@ -75,22 +81,22 @@ class Net:
         try:
             idx = value(values)
         except TypeError:
-            idx = np.arange(self.numNeurons)[values==value]
+            idx = np.arange(self.numNeurons)[np.equal(values, value)]
         return idx
 
     def getUniqueAttributes(self, name):
         return np.unique(self.getAttributes(name))
 
-    def setAttributes(self, name, values, indices=None, addIfNonexistent=True):
+    def setAttributes(self, name, values=0, indices=None, addIfNonexistent=True):
         # Set a value or array of values corresponding to the attribute
         #   specified by name and the neuron indices specified by indices. The
         #   array of values must be the same size as the array of indices.
         #   If indices is None, this sets attribute values for all neurons.
         try:
             idx = self.attributeNames.index(name)
-        except ValueError():
+        except ValueError:
             if addIfNonexistent:
-                self.addAttributes(name)
+                idx = self.addAttributes(name)
             else:
                 raise KeyError('Attribute "{n}" does not exist.'.format(n=name))
         if indices is None:
@@ -102,32 +108,51 @@ class Net:
         self.history = np.roll(self.history, 1, axis=1)
         # Determine which neurons will fire
         firing = (self.refractoryCountdowns <= 0) & (self.activations > self.thresholds)
+        notFiring =  np.logical_not(firing)
         # Pass signal from firing neurons downstream
         self.activations = firing.dot(self.connections)
         # Reset fired neurons to max countdown, continuing decrementing the rest.
-        self.refractoryCountdowns = (self.refractoryPeriods * firing) + ((self.refractoryCountdowns - 1) * (np.logical_not(firing)))
+        self.refractoryCountdowns = (self.refractoryPeriods * firing) + ((self.refractoryCountdowns - 1) * notFiring)
+        # Pass modulatory signals. Add the modulatory signal to the downstream
+        #   neuron's threshold, then move all threshold towards each neuron's
+        #   base threshold.
+        self.thresholds = self.thresholds + firing.dot(self.modConnections) + 0.25*(self.baseThresholds - self.thresholds)
         # Add firing to history
         self.history[:, 0] = firing
 
-    def getOutput(self, indices=None):
+    def getIndices(self, indices=None, attributeName=None, attributeValue=None):
+        # Get a list of selected neuron indices. If indices is supplied, it is
+        #   just directly returned. If attributeName/Value is supplied, indices
+        #   of the neurons corresponding to that name/value are returned.
+        #   If no arguments are supplied, a slice object selecting all indices
+        #   is returned.
+        if attributeName is not None:
+            indices = self.filterByAttribute(attributeName, attributeValue)
+        if indices is None:
+            indices = np.arange(self.numNeurons)
+        return indices
+
+    def getOutput(self, indices=None, attributeName=None, attributeValue=None):
         # Get activations of neurons indicated by indices.
         #   indices must be either an iterable or slice object indicating which
         #       neurons to get output from, or None, indicating all activations
         #       should be taken.
-        if indices is None:
-            indices = np.s_[:]
+        #   attributeName = the name of an attribute to use to select neurons
+        #   attributeValue = the value of the chosen attribute with which to
+        #       select neurons to return output from
+        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
         return self.activations[indices]
 
-    def stimByAttribute(self, attribute, values):
-        idx = self.filterByAttribute(attribute)
-        self.addInput(values, indices=idx)
+    def stimByAttribute(self, attributeName, attributeValues):
+        idx = self.filterByAttribute(attributeName)
+        self.addInput(attributeValues, indices=idx)
 
-    def recordByAttribute(self, attribute):
-        idx = self.filterByAttribute(attribute)
+    def recordByAttribute(self, attributeName, attributeValue):
+        idx = self.filterByAttribute(attributeName, attributeValue)
         return self.getOutput(indices=idx)
 
-    def addInput(self, inputs, indices=None):
+    def addInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
         # Set activations of neurons indicated by indices to the values in inputs
         #   inputs must be an iterables of less than or equal length to
         #       numNeurons indicating how much to add to the neuron's activation
@@ -135,12 +160,11 @@ class Net:
         #   indices must be either an iterable of the same length as inputs
         #       indicating which neurons to activate, or None, indicating the
         #       inputs should just be applied to the first N neurons
-        if indices is None:
-            indices = np.s_[:]
+        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
         self.activations[indices] = inputs
 
-    def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None, attribute=None, attributeValueA=None, attributeValueB=None):
+    def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None, attributeName=None, attributeValueA=None, attributeValueB=None, modulatory=False):
         # Change random connections
         #   n = number of connections to change
         #   mu = mean connection strength
@@ -149,24 +173,36 @@ class Net:
         #       from. If None, all neurons may be chosen to connect from.
         #   indicesB = the indices of neurons to choose from to randomly connect
         #       to. If None, all neurons may be chosen to connect to.
-        #   attribute = an alternate way to select neurons, by attribute name
+        #   attributeName = an alternate way to select neurons, by attribute name
         #   attributeValueA = the value of the indicated attribute to select
         #       neurons to connect from.
         #   attributeValueB = the value of the indicated attribute to select
         #       neurons to connect to. If None, the same group of neurons
         #       are selected for connections from and to.
+        #   modulatory = boolean flag indicating that the modulatory network
+        #       instead of the direct network should be randomized.
 
-        if attribute is not None:
-            indicesA = self.filterByAttribute(attribute, attributeValueA)
-            if attributeValueB is not None:
-                indicesB = self.filterByAttribute(attribute, attributeValueB)
-            else:
-                indicesB = indicesA
-
-        if indicesA is None:
-            indicesA = np.arange(self.numNeurons)
+        if attributeValueB is None:
+            attributeValueB = attributeValueA
         if indicesB is None:
             indicesB = indicesA
+        indicesA = self.getIndices(indices=indicesA, attributeName=attributeName, attributeValue=attributeValueA)
+        indicesB = self.getIndices(indices=indicesB, attributeName=attributeName, attributeValue=attributeValueB)
+
+        try:
+            if len(indicesA) == 0:
+                # Upstream neuron group is empty do nothing.
+                return
+        except TypeError:
+            # Probably a slice object rather than a list of indices, carry on.
+            pass
+        try:
+            if len(indicesB) == 0:
+                # Upstream neuron group is empty do nothing.
+                return
+        except TypeError:
+            # Probably a slice object rather than a list of indices, carry on.
+            pass
 
         # Get random neuron coordinates
         x = np.random.choice(indicesA, size=n, replace=True)
@@ -174,13 +210,16 @@ class Net:
         # Get random connection strengths
         c = np.random.normal(loc=mu, scale=sigma, size=n)
         # Change random connections
-        self.connections[x, y] = c
+        if modulatory:
+            self.modConnections[x, y] = c
+        else:
+            self.connections[x, y] = c
 
     def createChain(self):
         for k in range(self.numNeurons-1):
             n.connections[k, k+1] = 10
 
-    def createLayers(self, nLayers, nConnectionsPerLayer, nInterconnects, mu, sigma):
+    def createLayers(self, nLayers=1, nConnectionsPerLayer=1, nInterconnects=1, mu=0, sigma=1, indices=None, attributeName=None, attributeValue=None):
         # Add a layered topology to the net.
         #   nLayers = number of layers to divide neurons into
         #   nConnectionsPerLayer = number of synapses to randomly form between
@@ -191,22 +230,30 @@ class Net:
         #       integers, the first integer is the number of forward
         #       connections to make, the second is the number of backwards
         #       connections to make.
+        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        # Get number of selected neurons (index in case we're dealing with a slice)
+        numNeurons = len(np.arange(self.numNeurons)[indices])
+
         if type(nInterconnects) == type(int()):
             # User passed in a single integer. Convert it to
             #   (nForwards, nBackwards) format
             nInterconnects = (nInterconnects, nInterconnects)
 
-        layerNumbers = np.array([np.floor(x/(self.numNeurons/nLayers)) for x in range(self.numNeurons)])
-        self.addAttributes('layer', layerNumbers)
+        layerNumbers = np.array([np.floor(x/(numNeurons/nLayers)) for x in range(numNeurons)])
+        # Give all neurons a layer number of NaN, so they are unselectable by layer number
+        self.setAttributes('layer', values=np.nan, indices=np.s_[:])
+        # Set layer numbers of specific neurons selected to be in layers to the
+        #   correct layer value
+        self.setAttributes('layer', values=layerNumbers, indices=indices)
         layerNums = self.getUniqueAttributes('layer')
         for k, layerNum in enumerate(layerNums):
             # Make within-layer connections
-            self.randomizeConnections(nConnectionsPerLayer, mu, sigma, attribute='layer', attributeValueA=layerNum)
+            self.randomizeConnections(nConnectionsPerLayer, mu, sigma, attributeName='layer', attributeValueA=layerNum)
             if k < len(layerNums)-1:
                 # Make interconnections between adjacent layers
                 nextLayerNum = layerNums[k+1]
-                self.randomizeConnections(nInterconnects[0], mu, sigma, attribute='layer', attributeValueA=layerNum, attributeValueB=nextLayerNum)
-                self.randomizeConnections(nInterconnects[1], mu, sigma, attribute='layer', attributeValueA=nextLayerNum, attributeValueB=layerNum)
+                self.randomizeConnections(nInterconnects[0], mu, sigma, attributeName='layer', attributeValueA=layerNum, attributeValueB=nextLayerNum)
+                self.randomizeConnections(nInterconnects[1], mu, sigma, attributeName='layer', attributeValueA=nextLayerNum, attributeValueB=layerNum)
 
     def downRegulateAutapses(self, factor):
         # Reduce the strength of autapses
@@ -345,13 +392,17 @@ class Neuron:
 if __name__ == "__main__":
     np.set_printoptions(linewidth=100000, formatter=dict(float=lambda x: "% 0.1f" % x))
     N = 1000
-    NL = N//100
-    n = Net(N, refractoryPeriodMean=15, refractoryPeriodSigma=12)
-    n.createLayers(nLayers=NL,  nConnectionsPerLayer=N, nInterconnects=N//10, mu=0.5, sigma=2)
+    NL = N//50
+    n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7)
+    regularIndices = np.arange(0, 800)
+    modulatoryIndices = np.arange(800, N)
+    n.createLayers(nLayers=NL,  nConnectionsPerLayer=N, nInterconnects=N//10, mu=0.5, sigma=2, indices=regularIndices)
+    n.randomizeConnections(N*10, 0, 20, indicesA=modulatoryIndices, indicesB=regularIndices, modulatory=True)
+    n.randomizeConnections(N*10, 0, 20, indicesA=regularIndices, indicesB=modulatoryIndices, modulatory=True)
+    #     n.randomizeConnections(N, 0.5, 2, attribute='layer', attributeValueA=0, attributeValueB=layerNum)
 
     # layerNums = n.getUniqueAttributes('layer')
     # for layerNum in layerNums:
-    #     n.randomizeConnections(N, 0.5, 2, attribute='layer', attributeValueA=0, attributeValueB=layerNum)
 #    n.createChain()
 
 #    n.randomizeConnections(100, 2, 1)
@@ -364,7 +415,7 @@ if __name__ == "__main__":
     n.addInput(stim)
     n.run(n.historyLength)
     f, axs = plt.subplots(2, 2, sharex='col', gridspec_kw={'height_ratios': [3, 1]})
-    axs[0, 0].imshow(np.flip(n.history, axis=1), cmap='binary') #, 'XData', np.arange(n.historyLength))
+    axs[0, 0].imshow(np.flip(n.history, axis=1), cmap='binary', interpolation='none') #, 'XData', np.arange(n.historyLength))
     axs[0, 0].set_aspect('auto')
     # for k in range(n.numNeurons):
     #     plt.step(np.arange(n.historyLength), 5*n.history[k, :] + 10*k)
@@ -374,7 +425,7 @@ if __name__ == "__main__":
     #     print()
     axs[0, 0].set_ylabel('Neuron #')
     axs[0, 0].set_xlabel('Simulated time')
-    connIm = axs[0, 1].imshow(n.connections, cmap='seismic')
+    connIm = axs[0, 1].imshow(n.connections, cmap='seismic', interpolation='none')
     cRadius = max(np.max(n.connections), abs(np.min(n.connections)))
     connIm.set_clim(-cRadius, cRadius)
     axs[0, 1].set_ylabel("Upstream neuron #")
@@ -383,6 +434,8 @@ if __name__ == "__main__":
     layerNums = n.getUniqueAttributes('layer')
     for layerNum in layerNums:
         layerIdx = n.filterByAttribute('layer', layerNum)
+        if len(layerIdx) == 0:
+            continue
         axs[1, 0].plot(10*np.mean(np.flip(n.history[layerIdx, :], axis=1), axis=0) + (max(layerNums) - layerNum)*2)
 
     plt.show()
