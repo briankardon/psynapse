@@ -602,7 +602,6 @@ if __name__ == "__main__":
         connectomeFile = 'TestConnectome.csv'
         pcg = Connectome(connectomeFile)
         n = pcg.createNet()
-        print(np.sum(n.connections>0))
         majorGrouping = 'region'
     elif initType == "chain":
         N = 300
