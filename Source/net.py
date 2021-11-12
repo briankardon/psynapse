@@ -8,16 +8,20 @@ import sys
 class Net:
     ROTATION = np.array([[0, -1], [1, 0]])
     def __init__(self, numNeurons=1, refractoryPeriods=None, refractoryPeriodMean=4, refractoryPeriodSigma=3, thresholds=None, thresholdMean=1, thresholdSigma=0, historyLength=700):
-        # A class representing a simulated neural network. Neurons are
-        #   are initially unconnected. Apply a connection algorithm to
-        #   connect the neurons.
-        #   numNeurons = # of neurons to create within the net
-        #   refractoryPeriodMean = the mean random refractory period to give the
-        #       neurons.
-        #   refractoryPeriodMean = the standard deviation of the random
-        #       refractory period to give the neurons
-        #   historyLength = the amount of simulated time to save recorded firing
-        #       patterns
+        """A class representing a simulated neural network.
+
+        Neurons are are initially unconnected. Apply a connection algorithm
+        to connect the neurons.
+
+        Arguments:
+            numNeurons = # of neurons to create within the net
+            refractoryPeriodMean = the mean random refractory period to give
+                the neurons.
+            refractoryPeriodMean = the standard deviation of the random
+                refractory period to give the neurons
+            historyLength = the amount of simulated time to save recorded
+                firing patterns
+          """
 
         self.historyLength = historyLength
         self.numNeurons = numNeurons
@@ -57,17 +61,35 @@ class Net:
         self.attributeValues = np.zeros([0, self.numNeurons])
 
     def saveNet(self, filename):
+        """Save a net to a file so it can be loaded later.
+
+        Not implemented yet.
+        """
         pass
 
     def loadNet(self, filename):
+        """Load a saved net to a file.
+
+        Not implemented yet.
+        """
         pass
 
     def addAttribute(self, name, indices=None, initialValues=None, attributeMap=None):
-        # name = string, name of new attribute
-        # initialValues = list of initial values, or None to initialize with all
-        #   zeros. If a list, it must have length equal to numNeurons
-        # attributeMap = a dictionary mapping attribute values to some kind of human readable name
-        #   or None, indicating there is no mapping.
+        """Add an attribute to this net, allowing categorization of neurons.
+
+        Each neuron in the net can take any numerical value for each added
+            attribute. An optional attributeMap can be supplied to translate
+            numerical values into more eaningful values (for example human-
+            readable strings)
+
+        Arguments:
+            name = name of new attribute of this net (string)
+            initialValues = list of initial values, or None to initialize with all
+              zeros. If a list, it must have length equal to numNeurons
+            attributeMap = a dictionary mapping attribute values to some kind of human readable name
+              or None, indicating there is no mapping.
+          """
+
         if name in self.attributeNames:
             KeyError('Attribute "{n}" already exists.'.format(n=name))
         if indices is None:
@@ -88,7 +110,8 @@ class Net:
         return self.attributeValues.shape[0] - 1
 
     def removeAttributes(self, name):
-        # Deletes the specified attribute.
+        """Delete an attribute from this net."""
+
         try:
             idx = self.attributeNames.index(name)
         except ValueError():
@@ -99,9 +122,27 @@ class Net:
         np.delete(self.attributeValues, idx, 0)
 
     def getAttributes(self, name, indices=None, mapped=False):
-        # Return a value or array of values corresponding to the attribute
-        #   specified by name and the neuron indices specified by indices.
-        #   If indices is None, this returns attribute values for all neurons.
+        """ Return an array of values corresponding to the selected attribute
+
+        Optionally get the attribute values for only neurons selected by the
+            indices argument. The values can also be optionally returned after
+            being mapped by the attributeMap for this attribute.
+
+        Arguments:
+            name = name of an attribute of this net (string)
+            indices = (optional) list of neuron indices. Only attribute values
+                from the specified neurons will be returned. Default behavior
+                is for all neurons will be returned.
+            mapped = (optional) boolean flag indicating whether to return
+                the raw numerical attribute values (False) or to first map the
+                attribute values using the supplied attributeMap (True). Default
+                is false (return raw numerical values)
+
+        Returns:
+            An iterable containing attribute values. If unmapped, a numpy array.
+                If mapped, a list.
+        """
+
         try:
             idx = self.attributeNames.index(name)
         except ValueError():
@@ -116,33 +157,68 @@ class Net:
         else:
             return self.attributeValues[idx, indices]
 
-    def filterByAttribute(self, name, value):
-        # Get a list of neuron indices that match the value. If value is
-        #   numerical, return indices of neurons whose attribute value equals
-        #   that value exactly. If value is a function, it should take a numpy
-        #   array of values and return a numpy array of logicals indicating
-        #   which neurons should be selected
-        values = self.getAttributes(name)
+    def filterByAttribute(self, name, value, mapped=False):
+        ''' Get a list of neuron indices that match the given attribute value.
+
+        Arguments:
+            name = name of an attribute of this net (string)
+            value = the attribute value to match when filtering. If mapped
+                is False, value should be a raw numerical attribute value.
+                If mapped is True, value should be whatever type the
+                attributeMap translates into. Value can also be a function,
+                in which case it should take a numpy array of values and return
+                a numpy array of logicals indicating which neurons should be
+                selected
+            mapped = (optional) a boolean flag indicating whether to use raw
+                or mapped values to filter.
+
+        Returns:
+            A filtered list of neuron indices for neurons whose attribute value
+                matched the value provided.
+        '''
+        values = self.getAttributes(name, mapped=mapped)
         try:
             idx = value(values)
         except TypeError:
-            idx = np.arange(self.numNeurons)[np.equal(values, value)]
+            if mapped:
+                idx = np.arange(self.numNeurons)[[v==value for v in values]]
+            else:
+                idx = np.arange(self.numNeurons)[np.equal(values, value)]
         return idx
 
-    def getUniqueAttributes(self, name):
-        return np.unique(self.getAttributes(name))
+    def getUniqueAttributes(self, name, mapped=False):
+        '''Get a unique list of attribute values for the attribute name.
 
-    def setAttributes(self, name, values=0, valueNames=None, indices=None, addIfNonexistent=True, attributeMap=None):
-        # Set a value or array of values corresponding to the attribute
-        #   specified by name and the neuron indices specified by indices. The
-        #   array of values must be the same size as the array of indices.
-        #   If indices is None, this sets attribute values for all neurons.
-        # name = the name of an attribute
-        # values = a list of values to set. Ignored if valueNames it not None
-        # valueNames = a list of value names to set - will be mapped to values first if a attributeMap is available
-        # indices = a list of indexes of neurons to set attribute values for
-        # addIfNonexistent = a boolean indicating whether or not to create the attribute if it doesn't exist
-        # attributeMap = a map between attribute values and value names, only used if we're creating a new attribute
+        Arguments:
+            name = name of an attribute of this net (string)
+            mapped = (optional) a boolean flag indicating whether to return
+                unique raw or mapped values. Note that if the attributeMap is
+                not 1:1 reversible, this function could return different
+                results for mapped or unmapped.
+
+        Returns:
+            A list of unique attribute values for the given attribute name,
+                either raw numerical values, or mapped values.
+        '''
+        return np.unique(self.getAttributes(name, mapped=mapped))
+
+    def setAttributes(self, name, values=0, mapped=False, indices=None, addIfNonexistent=True, attributeMap=None):
+        '''Set an array of values for the specified attribute
+
+        Arguments:
+            name = name of an existing or new attribute of this net (string)
+            values = (optional) an attribute value or array of values to set
+            mapped = (optional) a boolean flag indicating whether the value
+                is a raw numerical value (False) or a mapped value (True).
+                Default is False.
+            indices = (optional) a list of indexes of neurons to set attribute
+                values for
+            addIfNonexistent = (optional) a boolean flag indicating whether or
+                not to create the attribute if it doesn't exist
+            attributeMap = (optional) a map between attribute values and value
+                names, only used if we're creating a new attribute
+        '''
+
         try:
             idx = self.attributeNames.index(name)
         except ValueError:
@@ -152,13 +228,14 @@ class Net:
                 raise KeyError('Attribute "{n}" does not exist.'.format(n=name))
         if indices is None:
             indices = np.s_[:]
-        if valueNames is not None:
-            # Map value names to values, then set them
-            values = [self.attributeMapsReversed[valueName] for valueName in valueNames]
+        if mapped:
+            # Value supplied is a mapped value. Reverse-map value, then set it.
+            values = [self.attributeMapsReversed[value] for value in values]
         self.attributeValues[idx, indices] = values
 
     def activate(self):
-        # Simulate activation of neurons and transmission of action potentials
+        '''Simulate activation of neurons and transmission of action potentials'''
+
         self.history = np.roll(self.history, 1, axis=1)
         # Determine which neurons will fire
         firing = (self.refractoryCountdowns <= 0) & (self.activations > self.thresholds)
@@ -175,11 +252,20 @@ class Net:
         self.history[:, 0] = firing
 
     def getIndices(self, indices=None, attributeName=None, attributeValue=None):
-        # Get a list of selected neuron indices. If indices is supplied, it is
-        #   just directly returned. If attributeName/Value is supplied, indices
-        #   of the neurons corresponding to that name/value are returned.
-        #   If no arguments are supplied, a slice object selecting all indices
-        #   is returned.
+        '''Get a list of selected neuron indices.
+
+        Arguments:
+            indices = (optional) directly return the indices.
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given.
+            attributeValue = (optional) the values with which to select neurons
+
+        Returns:
+            A list of indices selected, or if neither a list of indices or an
+                attribute name/value pair are supplied, a slice object selecting
+                all indices is returned.
+        '''
+
         if attributeName is not None:
             indices = self.filterByAttribute(attributeName, attributeValue)
         if indices is None:
@@ -187,64 +273,87 @@ class Net:
         return indices
 
     def getOutput(self, indices=None, attributeName=None, attributeValue=None):
-        # Get activations of neurons indicated by indices.
-        #   indices must be either an iterable or slice object indicating which
-        #       neurons to get output from, or None, indicating all activations
-        #       should be taken.
-        #   attributeName = the name of an attribute to use to select neurons
-        #   attributeValue = the value of the chosen attribute with which to
-        #       select neurons to return output from
+        '''Get activations of neurons indicated by indices.
+
+        Either indices or attributeName/attributeValue pair can be used to
+            select neurons. If no selecting criteria are given, all neurons are
+            selected.
+
+        Arguments:
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to get output from
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given.
+            attributeValue = (optional) the attribute values to use to select
+                neurons to get output from
+
+        Returns:
+            The activations of the selected neurons.
+          '''
+
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
         return self.activations[indices]
 
-    def stimByAttribute(self, attributeName, attributeValues):
-        idx = self.filterByAttribute(attributeName)
-        self.addInput(attributeValues, indices=idx)
-
-    def recordByAttribute(self, attributeName, attributeValue):
-        idx = self.filterByAttribute(attributeName, attributeValue)
-        return self.getOutput(indices=idx)
-
     def addInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
-        # Set activations of neurons indicated by indices to the values in inputs
-        #   inputs must be an iterables of less than or equal length to
-        #       numNeurons indicating how much to add to the neuron's activation
-        #       input
-        #   indices must be either an iterable of the same length as inputs
-        #       indicating which neurons to activate, or None, indicating the
-        #       inputs should just be applied to the first N neurons
+        '''Set activations of neurons indicated by indices to given input values
+
+        Either indices or attributeName/attributeValue pair can be used to
+            select neurons. If no selecting criteria are given, all neurons are
+            selected.
+
+        Arguments:
+            inputs = an iterables of less than or equal length to numNeurons
+                indicating how much to add to the neuron's activation input
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to set activations for
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given
+            attributeValue = (optional) the attribute value to use to select
+                neurons to set activations for
+        '''
+
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
         self.activations[indices] = inputs
 
     def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None, attributeName=None, attributeNameA=None, attributeValueA=None, attributeNameB=None, attributeValueB=None, modulatory=False):
-        # Change random connections
-        #   n = number of connections to change
-        #   mu = mean connection strength
-        #   sigma = standard deviation of connection strength
-        #   indicesA = the indices of neurons to choose from to randomly connect
-        #       from. If None, all neurons may be chosen to connect from.
-        #   indicesB = the indices of neurons to choose from to randomly connect
-        #       to. If None, all neurons may be chosen to connect to.
-        #   attributeName = an alternate way to select neurons, by attribute
-        #       name. If supplied, this name is used to select both upstream
-        #       and downstream neurons.
-        #   attributeNameB = the attribute used to select the upstream
-        #       neurons, if different from the attribute used to select the
-        #       downstream neurons. If attributeName is supplied, it is used for
-        #       selecting both upstream and downstream neurons.
-        #   attributeValueA = the value of the indicated attribute to select
-        #       neurons to connect from.
-        #   attributeNameB = the attribute used to select the downstream
-        #       neurons, if different from the attribute used to select the
-        #       upstream neurons. If attributeName is supplied, it is used for
-        #       selecting both upstream and downstream neurons.
-        #   attributeValueB = the value of the indicated attribute to select
-        #       neurons to connect to. If None, the same group of neurons
-        #       are selected for connections from and to.
-        #   modulatory = boolean flag indicating that the modulatory network
-        #       instead of the direct network should be randomized.
+        '''Change random connection strengths in net
+
+        Three options are given to select upstream and downstream neurons to
+            make connections between. For upstream neurons, either indicesA may
+            be used to directly specify neuron indices, or attributeNameA/
+            attributeValueA can be used to filter neurons. For downstream
+            neurons, either indicesB or attributeNameB/attributeValueB can be
+            used to filter neurons. Additionally, attributeName may be used
+            for convenience to specify both upstream and downstream attribute
+            name to use for neuron selection.
+
+        Arguments:
+            n = number of connections to change
+            mu = mean connection strength
+            sigma = standard deviation of connection strength
+            indicesA = (optional) the indices of neurons to choose from to
+                randomly connect from. If None, all neurons may be chosen to
+                connect from.
+            indicesB = (optional) the indices of neurons to choose from to
+                randomly connect to. If None, all neurons may be chosen to
+                connect to.
+            attributeName = (optional) the attribute name to select both
+                upstream and downstream neurons.
+            attributeNameA = (optional) the attribute used to select the
+                upstream neurons. If indicesA or attributeName is supplied, this
+                is ignored.
+            attributeValueA = (optional) the attribute value to select upstream
+                neurons to connect from.
+            attributeNameB = (optional) the attribute used to select the
+                downstream neurons. If indicesB or attributeName is supplied,
+                this is ignored.
+            attributeValueA = (optional) the attribute value to select
+                downstream neurons to connect from.
+            modulatory = boolean flag indicating that the modulatory network
+                instead of the direct network should be randomized.
+        '''
 
         if attributeName is not None:
             attributeNameA = attributeName
@@ -285,31 +394,85 @@ class Net:
             self.connections[x, y] = c
 
     def setThresholds(self, thresholds, indices=None, attributeName=None, attributeValue=None):
-        # Set the thresholds of the specified neurons.
+        '''Set the thresholds of the specified neurons.
+
+        Either indices or attributeName/attributeValue pair can be used to
+            select neurons. If no selecting criteria are given, all neurons are
+            selected.
+
+        Arguments:
+            thresholds = a threshold value, or array of threshold values to set
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to set threshold for
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given.
+            attributeValue = (optional) the attribute value to use to select
+                neurons to set thresholds for
+        '''
+
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
         self.thresholds[indices] = thresholds
 
     def setRefractoryPeriods(self, refractoryPeriods, indices=None, attributeName=None, attributeValue=None):
-        # Set the thresholds of the specified neurons.
+        '''Set the refractory periods of the specified neurons.
+
+        Either indices or attributeName/attributeValue pair can be used to
+            select neurons. If no selecting criteria are given, all neurons are
+            selected.
+
+        Arguments:
+            refractoryPeriods = a refractory period value, or array of
+                refractory period values to set
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to set refractory period for
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given.
+            attributeValue = (optional) the attribute value to use to select
+                neurons to set refractory period for
+        '''
+
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
         self.refractoryPeriods[indices] = refractoryPeriods
 
     def createChain(self):
+        '''An algorithm for adding a chain topology to the net.
+
+            Each neuron will be connected in turn to the neuron with the next
+            index, and the last neuron will then be connected to the first.
+        '''
+
         for k in range(self.numNeurons-1):
             n.connections[k, k+1] = 10
         n.connections[-1, 0] = 10
 
-    def createLayers(self, nLayers=1, nConnectionsPerLayer=1, nInterconnects=1, mu=0, sigma=1, indices=None, attributeName=None, attributeValue=None):
-        # Add a layered topology to the net.
-        #   nLayers = number of layers to divide neurons into
-        #   nConnectionsPerLayer = number of synapses to randomly form between
-        #       the neurons in each layer
-        #   nInterconnects = number of connections to form between adjacent
-        #       layers. If this is a single integer, then it is the number of
-        #       both forward and backward connections. If it is a tuple of
-        #       integers, the first integer is the number of forward
-        #       connections to make, the second is the number of backwards
-        #       connections to make.
+    def createLayers(self, nLayers=1, nIntraconnects=1, nInterconnects=1, mu=0, sigma=1, indices=None, attributeName=None, attributeValue=None):
+        '''An algorithm for adding a layered topology to part of the net.
+
+        The selected neurons will be assigned to layers. Each layer will be
+            self-interconnected, and connected to the next layer. If selection
+            criteria are omitted, all neurons will be included in layered
+            topology.
+
+        Arguments:
+            nLayers = integer number of layers to divide neurons into
+            nIntraconnects = number of synapses to randomly form between
+                the neurons within each layer
+            nInterconnects = number of connections to form between
+                adjacent layers. If this is a single integer, then it is the
+                number of both forward and backward connections. If it is a
+                tuple of integers, the first integer is the number of forward
+                connections to make, the second is the number of backwards
+                connections to make.
+            mu = mean connection strength
+            sigma = standard deviation of connection strength
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to include in layered topology
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given.
+            attributeValue = (optional) the attribute value to use to select
+                neurons to include in layered topology
+        '''
+
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
         # Get number of selected neurons (index in case we're dealing with a slice)
         numNeurons = len(np.arange(self.numNeurons)[indices])
@@ -328,24 +491,20 @@ class Net:
         layerNums = self.getUniqueAttributes('layer')
         for k, layerNum in enumerate(layerNums):
             # Make within-layer connections
-            self.randomizeConnections(nConnectionsPerLayer, mu, sigma, attributeName='layer', attributeValueA=layerNum)
+            self.randomizeConnections(nIntraconnects, mu, sigma, attributeName='layer', attributeValueA=layerNum)
             if k < len(layerNums)-1:
                 # Make interconnections between adjacent layers
                 nextLayerNum = layerNums[k+1]
                 self.randomizeConnections(nInterconnects[0], mu, sigma, attributeName='layer', attributeValueA=layerNum, attributeValueB=nextLayerNum)
                 self.randomizeConnections(nInterconnects[1], mu, sigma, attributeName='layer', attributeValueA=nextLayerNum, attributeValueB=layerNum)
 
-    def downRegulateAutapses(self, factor):
-        # Reduce the strength of autapses
-        #   factor = the factor by which the mean autapse strength should be
-        #       smaller than the mean synapse strength
-        x = range(self.numNeurons)
-
-    def getPositionRanges(self, positionData):
-        # Position data must be a Nx2 array of x,y coordinates
-        return ((np.min(positionData[:, 0]), np.max(positionData[:, 0])), (np.min(positionData[:, 1]), np.max(positionData[:, 1])))
-
     def arrangeNeurons(self):
+        '''Attempt to give neurons spatial positions
+
+        Attempts to cluster neurons according to their connectivity patterns.
+        Deprecated.
+        '''
+
         # Try to arrange neurons based on how they're connected? Maybe?
         pca = PCA(n_components=2)
         principalComponents = pca.fit_transform(self.connections)
@@ -371,7 +530,17 @@ class Net:
         for k in range(self.numNeurons):
             self.neurons[k].setPosition(principalComponents[k, :])
 
+    def getPositionRanges(self, positionData):
+        '''Get the x and y range for neuron spatial position values.'''
+
+        # Position data must be a Nx2 array of x,y coordinates
+        return ((np.min(positionData[:, 0]), np.max(positionData[:, 0])), (np.min(positionData[:, 1]), np.max(positionData[:, 1])))
+
     def showNet(self):
+        '''Display graphical representation of net.
+
+        Not recommended for large nets - very slow, deprecated.
+        '''
         x = [nr.getX() for nr in self.neurons]
         y = [nr.getY() for nr in self.neurons]
         maxC = np.absolute(self.connections).max()
@@ -430,6 +599,13 @@ class Net:
         plt.show()
 
     def run(self, iters, visualize=True):
+        '''Simulate net
+
+        Arguments:
+            iters = number of simulation iterations to run
+            visualize = (optional) visualize simulation (not implemented)
+        '''
+
         if visualize:
             pass
             # plt.ion()
@@ -441,8 +617,15 @@ class Net:
                 pass
 
 class Connectome:
-    # A class representing a set of projecting populations
+    '''A class representing a set of projecting populations'''
     def __init__(self, connectomeFile):
+        '''Constructor for connectome class
+
+        For connectome file format specification, see example files.
+
+        Arguments:
+            connectomeFile = the path to a connectome CSV file.
+        '''
         self.populations = []
         # Open the connectome definition file
         with open(connectomeFile, newline='') as csvfile:
@@ -454,7 +637,6 @@ class Connectome:
                     continue
                 self.populations.append(ProjectingPopulation(*row))
         # Calculate the total number of neurons
-        print([p.numNeurons for p in self.populations])
         self.numNeurons = sum([p.numNeurons for p in self.populations])
         # Get a unique list of region names
         upstreamRegions = set(p.regionName for p in self.populations)
@@ -473,12 +655,14 @@ class Connectome:
             # Create a list of region IDs - each region is a named group of neurons
             regionID = self.regionNameReverseMap[self.populations[k].regionName]
             self.regionIDs.extend([regionID for j in range(self.populations[k].numNeurons)])
-        print('populationIDs')
-        print(self.populationIDs)
-        print('regionIDs')
-        print([self.regionNameMap[id] for id in self.regionIDs])
 
     def createNet(self, **kwargs):
+        '''Construct net according to connectome specification
+
+        Arguments:
+            Any keyword arguments will be passed through to the Net constructor
+        '''
+
         n = Net(numNeurons=self.numNeurons, refractoryPeriodMean=4, refractoryPeriodSigma=3, **kwargs)
         # Set an attribute marking each neuron with its region number and population number
         n.setAttributes('population', values=self.populationIDs)
@@ -509,7 +693,7 @@ class Connectome:
             # Loop over each downstream region and add connections
             for j in range(len(connectedRegionIDs)):
                 regionalConnectionCount = sum(connections == connectedRegionIDs[j])
-                print('making {n} connections from {a} to {b}'.format(n=regionalConnectionCount, a=k, b=self.regionNameMap[connectedRegionIDs[j]]))
+                # print('making {n} connections from {a} to {b}'.format(n=regionalConnectionCount, a=k, b=self.regionNameMap[connectedRegionIDs[j]]))
                 n.randomizeConnections(regionalConnectionCount,
                     self.populations[k].meanConnectionStrength,
                     self.populations[k].stdConnectionStrength,
@@ -519,17 +703,40 @@ class Connectome:
         return n
 
 class ProjectingPopulation:
+    '''A class representing one projecting population within a connectome spec'''
     def __init__(self, regionA, regionsB, populationName, proportions, numNeurons, modulatory, thresholds, refractoryPeriods, numConnections, connectionStrength):
-        # print('regionA=', regionA)
-        # print('regionsB=', regionsB)
-        # print('populationName=', populationName)
-        # print('proportions=', proportions)
-        # print('numNeurons=', numNeurons)
-        # print('modulatory=', modulatory)
-        # print('thresholds=', thresholds)
-        # print('refractoryPeriods=', refractoryPeriods)
-        # print('numConnections=', numConnections)
-        # print('connectionStrength=', connectionStrength)
+        '''Constructor for ProjectingPopulation class
+
+        This is meant to be directly passed the raw string elements in a single
+            row of a connectome specification CSV file.
+
+        Arguments:
+            regionA = the name of the upstream region that contains this
+                projecting population
+            regionsB = a comma-separated string of names of downstream regions
+                that this projecting population projects to
+            populationName = a name for this projecting population
+            proportions = a comma-separated string containing relative weights
+                for the downstream regions. Must have the same # of proportions
+                as the # of regions in regionsB. The connections will be
+                distributed according to these weights.
+            numNeurons = the number of neurons in this projecting population
+            modulatory = a boolean flag indicating whether the connections are
+                modulatory or direct
+            thresholds = a string containing a comma-separated pair of numbers
+                indicating the mean and stdev of the thresholds for the
+                neurons in this population
+            refractoryPeriods = a string containing a comma-separated pair of
+                numbers indicating the mean and stdev of the refractory periods
+                for the neurons in this population
+            numConnections = a string containing a comma-separated pair of
+                numbers indicating the mean and stdev of the number of
+                outgoing connections per neuron
+            connectionStrength = a string containing a comma-separated pair of
+                numbers indicating the mean and stdev of the connection
+                strengths for the outgoing connections
+        '''
+
         self.regionName = regionA
         self.populationName = populationName
         self.numNeurons = int(numNeurons)
@@ -555,35 +762,86 @@ class ProjectingPopulation:
         self.meanRefractoryPeriod, self.stdRefractoryPeriod = [float(r) for r in refractoryPeriods.split(',')]
 
 class NetViewer:
+    '''Class allowing for visualization of nets'''
     def __init__(self, root):
         self.root = root
 
 class Neuron:
+    ''' A class for holding auxiliary attributes for a single neuron in a net.'''
     def __init__(self, net, index, x=None, y=None):
-        # net is the Net that this Neuron belongs to
-        # index is the index within the net that
+        '''Constructor for the Neuron class
+
+        Arguments:
+            net = the Net that this Neuron belongs to
+            index = the index within the net of this neuron
+            x = (optional) the spatial x position of the neuron
+            y = (optional) the spatial y position of the neuron
+        '''
+
         self.net = net
         self.index = index
         self.position = [x, y]
 
     def setX(self, x):
+        '''Set the spatial x position of the neuron
+
+        x = the spatial x position of the neuron
+        '''
+
         self.position[0] = x
+
     def setY(self, y):
+        '''Set the spatial y position of the neuron
+
+        y = the spatial y position of the neuron
+        '''
+
         self.position[1] = y
     def setPosition(self, position):
+        '''Set the spatial position of the neuron
+
+        Arguments:
+            position = a tuple of numbers representing the the spatial x and y
+                positions of the neuron
+        '''
+
         self.position = position
     def getX(self):
+        '''Get the spatial x position of the neuron
+
+        Returns:
+            x = the spatial x position of the neuron
+        '''
         return self.position[0]
     def getY(self):
+        '''Get the spatial y position of the neuron
+
+        Returns:
+            y = the spatial y position of the neuron
+        '''
         return self.position[1]
 
     def setActivation(self, activation):
+        '''Convenience function to set the activation of this neuron in the net
+
+        Arguments:
+            activation = the activation level to set the neuron's activation to
+        '''
+
         self.net.activations[self.index] = activation
 
     def getActivation(self):
+        '''Convenience function to get the activation of this neuron in the net
+
+        Returns:
+            activation = the activation level of this neuron
+        '''
+
         self.net.activations[self.index] = activation
 
 if __name__ == "__main__":
+    '''Code to run when this module is run directly, rather than imported'''
+
     np.set_printoptions(linewidth=100000, formatter=dict(float=lambda x: "% 0.1f" % x))
 
     initType = sys.argv[1]   #'connectome'
@@ -596,7 +854,7 @@ if __name__ == "__main__":
         n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7)
         regularIndices = np.arange(0, 1000)
         modulatoryIndices = np.arange(800, N)
-        n.createLayers(nLayers=NL,  nConnectionsPerLayer=N, nInterconnects=N//10, mu=0.7, sigma=2, indices=regularIndices)
+        n.createLayers(nLayers=NL,  nIntraconnects=N, nInterconnects=N//10, mu=0.7, sigma=2, indices=regularIndices)
         majorGrouping = 'layer'
     elif initType == "connectome":
         connectomeFile = 'TestConnectome.csv'
