@@ -7,7 +7,10 @@ import sys
 
 class Net:
     ROTATION = np.array([[0, -1], [1, 0]])
-    def __init__(self, numNeurons=1, refractoryPeriods=None, refractoryPeriodMean=4, refractoryPeriodSigma=3, thresholds=None, thresholdMean=1, thresholdSigma=0, historyLength=700):
+    def __init__(self, numNeurons=1, refractoryPeriods=None,
+        refractoryPeriodMean=4, refractoryPeriodSigma=3, thresholds=None,
+        thresholdMean=1, thresholdSigma=0, historyLength=700,
+        hebbianPlasticityRate=0.1, homeostaticPlasticityFactor=0.1):
         """A class representing a simulated neural network.
 
         Neurons are are initially unconnected. Apply a connection algorithm
@@ -15,21 +18,50 @@ class Net:
 
         Arguments:
             numNeurons = # of neurons to create within the net
+            refractoryPeriods = an array of refractory periods to assign to
+                the neurons. Must be length of numNeurons. If omitted, instead
+                the refractory periods will be randomized according to the
+                refractoryPeriodMean and refractoryPeriodSigma arguments
             refractoryPeriodMean = the mean random refractory period to give
                 the neurons.
-            refractoryPeriodMean = the standard deviation of the random
+            refractoryPeriodSigma = the standard deviation of the random
                 refractory period to give the neurons
+            thresholds = an array of thresholds to assign to
+                the neurons. Must be length of numNeurons. If omitted, instead
+                the thresholds will be randomized according to the
+                thresholdsMean and thresholdsSigma arguments
+            thresholdsMean = the mean random threshold to give the neurons.
+            thresholdsSigma = the standard deviation of the random threshold to
+                give the neurons
             historyLength = the amount of simulated time to save recorded
                 firing patterns
+            hebbianPlasticityRate = the rate at which connection strengths
+                change for each coincident firing. For example, any connections
+                between coincident firing neurons (one then the other) are
+                additively increased by this value. Should be small, but greater
+                than zero for biologically reasonable behavior. Default is 0.1.
+            homeostaticPlasticityFactor = the factor by which connection strengths
+                return back to their base values. Every time step, all neuron
+                connections are brought closer to their base connection strength
+                by an amount that is proportional to the current distance
+                between their current strength and their base strength. The
+                constant of proportionality is this factor. Default is 0.1.
+                Should be between 0 and 1 for biologically reasonable behavior.
           """
 
         self.historyLength = historyLength
+        if historyLength < 2:
+            raise ValueError('historyLength must be at least 2, to allow for Hebbian learning.')
         self.numNeurons = numNeurons
         self.connections = np.zeros([self.numNeurons, self.numNeurons])   # Direct excitatory/inhibitory connection matrix
+        self.baseConnections = self.connections.copy()
         self.modConnections = np.zeros([self.numNeurons, self.numNeurons])  # Modulatory connection matrix
+        self.baseModConnections = self.modConnections.copy()
         self.neurons = [Neuron(self, k) for k in range(self.numNeurons)]
         self.activations = np.zeros(self.numNeurons)
         self.history = np.zeros([self.numNeurons, self.historyLength])
+        self.hebbianPlasticityRate = hebbianPlasticityRate
+        self.homeostaticPlasticityFactor = homeostaticPlasticityFactor
         if thresholds is None:
             self.baseThresholds = np.random.normal(loc=thresholdMean, scale=thresholdSigma, size=self.numNeurons)
         else:
@@ -250,6 +282,13 @@ class Net:
         self.thresholds = self.thresholds + firing.dot(self.modConnections) + 0.25*(self.baseThresholds - self.thresholds)
         # Add firing to history
         self.history[:, 0] = firing
+        # Create matrix of firing coincidences (where C[a, b] = 1 if b fired,
+        #   and a fired on the last step), then multiply by the hebbian
+        #   plasticity factor, to determine learning changes in network
+        hebbianPlasticity = np.outer(self.history[:, 1], firing) * self.hebbianPlasticityRate
+        # Create matrix to represent homeostatic relaxation of connection strengths
+        homeostaticPlasticity = (self.baseConnections - self.connections) * self.homeostaticPlasticityFactor
+        self.connections += hebbianPlasticity + homeostaticPlasticity
 
     def getIndices(self, indices=None, attributeName=None, attributeValue=None):
         '''Get a list of selected neuron indices.
@@ -270,6 +309,13 @@ class Net:
             indices = self.filterByAttribute(attributeName, attributeValue)
         if indices is None:
             indices = np.arange(self.numNeurons)
+        try:
+            # Check if indices is an array or scalar value.
+            iter(indices)
+        except TypeError:
+            # Indices is a scalar value. Turn it into an array.
+            indices = np.array(indices)
+
         return indices
 
     def getOutput(self, indices=None, attributeName=None, attributeValue=None):
@@ -317,7 +363,10 @@ class Net:
 
         self.activations[indices] = inputs
 
-    def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None, attributeName=None, attributeNameA=None, attributeValueA=None, attributeNameB=None, attributeValueB=None, modulatory=False):
+    def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None,
+            attributeName=None, attributeNameA=None, attributeValueA=None,
+            attributeNameB=None, attributeValueB=None, modulatory=False,
+            setBase=True, setCurrent=True):
         '''Change random connection strengths in net
 
         Three options are given to select upstream and downstream neurons to
@@ -351,8 +400,13 @@ class Net:
                 this is ignored.
             attributeValueA = (optional) the attribute value to select
                 downstream neurons to connect from.
-            modulatory = boolean flag indicating that the modulatory network
-                instead of the direct network should be randomized.
+            modulatory = (optional) boolean flag indicating that the modulatory
+                network instead of the direct network should be randomized.
+                Default is false (direct, not modulatory)
+            setBase = (optional) boolean flag indicating whether to change the
+                base connection strengths. Default is True.
+            setCurrent = (optional) boolean flag indicating whether to change
+                the current connection strengths. Default is True.
         '''
 
         if attributeName is not None:
@@ -388,12 +442,104 @@ class Net:
         # Get random connection strengths
         c = np.random.normal(loc=mu, scale=sigma, size=n)
         # Change random connections
-        if modulatory:
-            self.modConnections[x, y] = c
-        else:
-            self.connections[x, y] = c
+        self.setConnections(strengths=c, indicesA=x, indicesB=y,
+                modulatory=modulatory, setBase=True, setCurrent=True)
 
-    def setThresholds(self, thresholds, indices=None, attributeName=None, attributeValue=None):
+    def setConnections(self, strengths, indicesA=None, indicesB=None,
+            attributeName=None, attributeNameA=None, attributeValueA=None,
+            attributeNameB=None, attributeValueB=None, modulatory=False,
+            setBase=True, setCurrent=True):
+        '''Set connection strengths in net
+
+        Three options are given to select upstream and downstream neurons to
+            set connection strengths between. For upstream neurons, either
+            indicesA may be used to directly specify neuron indices, or
+            attributeNameA/attributeValueA can be used to filter neurons. For
+            downstream neurons, either indicesB or attributeNameB/
+            attributeValueB can be used to filter neurons. Additionally,
+            attributeName may be used for convenience to specify both upstream
+            and downstream attribute name to use for neuron selection.
+
+        Arguments:
+            strengths = the connection strengths to set. If this is an iterable,
+                there must be one per neuron specified. If this is not an
+                iterable, it must be a scalar value that all connections
+                will be set to.
+            indicesA = (optional) the indices of neurons to choose from to
+                randomly connect from. If None, all neurons may be chosen to
+                connect from.
+            indicesB = (optional) the indices of neurons to choose from to
+                randomly connect to. If None, all neurons may be chosen to
+                connect to.
+            attributeName = (optional) the attribute name to select both
+                upstream and downstream neurons.
+            attributeNameA = (optional) the attribute used to select the
+                upstream neurons. If indicesA or attributeName is supplied, this
+                is ignored.
+            attributeValueA = (optional) the attribute value to select upstream
+                neurons to connect from.
+            attributeNameB = (optional) the attribute used to select the
+                downstream neurons. If indicesB or attributeName is supplied,
+                this is ignored.
+            attributeValueA = (optional) the attribute value to select
+                downstream neurons to connect from.
+            modulatory = (optional) boolean flag indicating that the modulatory
+                network instead of the direct network should be randomized.
+                Default is false (direct, not modulatory)
+            setBase = (optional) boolean flag indicating whether to change the
+                base connection strengths. Default is True.
+            setCurrent = (optional) boolean flag indicating whether to change
+                the current connection strengths. Default is True.
+        '''
+
+        if attributeName is not None:
+            attributeNameA = attributeName
+            attributenameB = attributeName
+        if attributeNameB is None and attributeNameA is not None:
+            attributeNameB = attributeNameA
+        if attributeValueB is None:
+            attributeValueB = attributeValueA
+        if indicesB is None:
+            indicesB = indicesA
+        indicesA = self.getIndices(indices=indicesA, attributeName=attributeNameA, attributeValue=attributeValueA)
+        indicesB = self.getIndices(indices=indicesB, attributeName=attributeNameB, attributeValue=attributeValueB)
+
+        try:
+            if len(indicesA) == 0:
+                # Upstream neuron group is empty do nothing.
+                return
+        except TypeError:
+            # Probably a slice object rather than a list of indices, carry on.
+            pass
+        try:
+            if len(indicesB) == 0:
+                # Upstream neuron group is empty do nothing.
+                return
+        except TypeError:
+            # Probably a slice object rather than a list of indices, carry on.
+            pass
+
+        try:
+            # Check if strengths is an array or scalar.
+            iter(strengths)
+        except TypeError:
+            # strengths is a scalar strength value. Create an array out of
+            #   this value to match the indices arrays.
+            strengths = np.full(indicesA.shape, strengths)
+
+        if modulatory:
+            if setBase:
+                self.baseModConnections[indicesA, indicesB] = strengths
+            if setCurrent:
+                self.modConnections[indicesA, indicesB] = strengths
+        else:
+            if setBase:
+                self.baseConnections[indicesA, indicesB] = strengths
+            if setCurrent:
+                self.connections[indicesA, indicesB] = strengths
+
+    def setThresholds(self, thresholds, indices=None, attributeName=None,
+            attributeValue=None, setBase=False, setCurrent=True):
         '''Set the thresholds of the specified neurons.
 
         Either indices or attributeName/attributeValue pair can be used to
@@ -408,10 +554,15 @@ class Net:
                 attribute values given.
             attributeValue = (optional) the attribute value to use to select
                 neurons to set thresholds for
+            setBase = (optional) boolean flag indicating whether to change the
+                base threshold. Default is False.
+            setCurrent = (optional) boolean flag indicating whether to change
+                the current threshold. Default is True.
         '''
 
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
         self.thresholds[indices] = thresholds
+        self.baseThresholds[indices] = thresholds
 
     def setRefractoryPeriods(self, refractoryPeriods, indices=None, attributeName=None, attributeValue=None):
         '''Set the refractory periods of the specified neurons.
@@ -441,9 +592,9 @@ class Net:
             index, and the last neuron will then be connected to the first.
         '''
 
-        for k in range(self.numNeurons-1):
-            n.connections[k, k+1] = 10
-        n.connections[-1, 0] = 10
+        indicesA = np.array(range(self.numNeurons))
+        indicesB = np.roll(indicesA, -1)
+        self.setConnections(10, indicesA=indicesA, indicesB=indicesB)
 
     def createLayers(self, nLayers=1, nIntraconnects=1, nInterconnects=1, mu=0, sigma=1, indices=None, attributeName=None, attributeValue=None):
         '''An algorithm for adding a layered topology to part of the net.
@@ -674,7 +825,7 @@ class Connectome:
                 loc=self.populations[k].meanThreshold,
                 scale=self.populations[k].stdThreshold,
                 size=self.populations[k].numNeurons)
-            n.setThresholds(thresholds, attributeName='population', attributeValue=k)
+            n.setThresholds(thresholds, attributeName='population', attributeValue=k, base=False, current=True)
             # Set refractory periods
             refractoryPeriods = np.random.normal(
                 loc=self.populations[k].meanRefractoryPeriod,
@@ -687,7 +838,9 @@ class Connectome:
                 # This region has no outgoing projections.
                 continue
             # Determine how many connections to make
+            print('nn = ', self.populations[k].numNeurons)
             numConnections = self.populations[k].numNeurons * np.round(np.random.normal(loc=self.populations[k].meanNumConnections, scale=self.populations[k].stdNumConnections)).astype('int')
+            print('nc = ', numConnections)
             # Choose how many connections will go to each downstream regions
             connections = np.random.choice(connectedRegionIDs, size=numConnections, p=self.populations[k].connectionProbabilities)
             # Loop over each downstream region and add connections
@@ -698,9 +851,17 @@ class Connectome:
                     self.populations[k].meanConnectionStrength,
                     self.populations[k].stdConnectionStrength,
                     attributeNameA="population", attributeValueA=k,
-                    attributeNameB="region", attributeValueB=connectedRegionIDs[j]
+                    attributeNameB="region", attributeValueB=connectedRegionIDs[j],
+                    modulatory=self.populations[k].modulatory
                     )
         return n
+
+def boolParser(value):
+    '''Parse a value as a boolean, allowing for strings "0" and "1"'''
+    if type(value) == type(str()):
+        return bool(int(value))
+    else:
+        return bool(value)
 
 class ProjectingPopulation:
     '''A class representing one projecting population within a connectome spec'''
@@ -722,44 +883,65 @@ class ProjectingPopulation:
                 distributed according to these weights.
             numNeurons = the number of neurons in this projecting population
             modulatory = a boolean flag indicating whether the connections are
-                modulatory or direct
+                modulatory. This can be expressed as a string "0" or "1", or
+                as any other boolean-castable python type.
             thresholds = a string containing a comma-separated pair of numbers
                 indicating the mean and stdev of the thresholds for the
-                neurons in this population
+                neurons in this population, or a tuple of numerical values
+                representing the mean and stdev
             refractoryPeriods = a string containing a comma-separated pair of
                 numbers indicating the mean and stdev of the refractory periods
-                for the neurons in this population
+                for the neurons in this population, or a tuple of numerical
+                values representing the mean and stdev.
             numConnections = a string containing a comma-separated pair of
                 numbers indicating the mean and stdev of the number of
-                outgoing connections per neuron
+                outgoing connections per neuron, or a tuple of numerical values
+                representing the mean and stdev.
             connectionStrength = a string containing a comma-separated pair of
                 numbers indicating the mean and stdev of the connection
-                strengths for the outgoing connections
+                strengths for the outgoing connections, or a tuple of numerical
+                values representing the mean and stdev.
         '''
 
         self.regionName = regionA
         self.populationName = populationName
-        self.numNeurons = int(numNeurons)
-        if len(regionsB.strip()) == 0:
+        (self.numNeurons,) = self.unpackParam(numNeurons, parser=int)
+        self.connectedRegions = self.unpackParam(regionsB, parser=str)
+        if len(self.connectedRegions) == 0:
             # No downstream connected regions given
-            self.connectedRegions = []
             self.meanNumConnections = 0
             self.stdNumConnections = 0
             self.meanConnectionStrength = 0
             self.stdConnectionStrength = 0
         else:
-            self.connectedRegions = [r.strip() for r in regionsB.split(',')]
-            self.meanNumConnections, self.stdNumConnections = [float(n) for n in numConnections.split(',')]
-            self.meanConnectionStrength, self.stdConnectionStrength = [float(s) for s in connectionStrength.split(',')]
-        if len(proportions.strip()) == 0:
+            (self.meanNumConnections, self.stdNumConnections) = self.unpackParam(numConnections, parser=float)
+            (self.meanConnectionStrength, self.stdConnectionStrength) = self.unpackParam(connectionStrength, parser=float)
+        proportions = self.unpackParam(proportions, parser=float)
+        if len(proportions) == 0:
             # No proportions given
             self.connectionProbabilities = [1]
         else:
-            proportions = [float(p) for p in proportions.split(',')]
             self.connectionProbabilities = [p/sum(proportions) for p in proportions]
-        self.modulatory = bool(modulatory)
-        self.meanThreshold, self.stdThreshold = [float(t) for t in thresholds.split(',')]
-        self.meanRefractoryPeriod, self.stdRefractoryPeriod = [float(r) for r in refractoryPeriods.split(',')]
+        (self.modulatory,) = self.unpackParam(modulatory, parser=boolParser)
+        (self.meanThreshold, self.stdThreshold) = self.unpackParam(thresholds, parser=float)
+        (self.meanRefractoryPeriod, self.stdRefractoryPeriod) = self.unpackParam(refractoryPeriods, parser=float)
+
+    def unpackParam(self, params, parser=float):
+        '''Unpack parameters
+
+        param = a parameter, either as a comma-separated string, or a tuple
+            of values
+        parser = a function that parses a parameter value. Ignored if params are
+            a tuple, instead of a comma-separated string'''
+        if type(params) == type(str()):
+            splitParams = [p.strip() for p in params.split(',')]
+            if len(splitParams) == 1 and len(splitParams[0]) == 0:
+                # params is empty
+                return []
+            else:
+                return [parser(s) for s in splitParams]
+        elif type(params) == type(tuple()):
+            return params
 
 class NetViewer:
     '''Class allowing for visualization of nets'''
