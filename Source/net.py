@@ -272,6 +272,8 @@ class Net:
         # Determine which neurons will fire
         firing = (self.refractoryCountdowns <= 0) & (self.activations > self.thresholds)
         notFiring =  np.logical_not(firing)
+        # Add firing to history
+        self.history[:, 0] = firing
         # Pass signal from firing neurons downstream
         self.activations = firing.dot(self.connections)
         # Reset fired neurons to max countdown, continuing decrementing the rest.
@@ -280,8 +282,6 @@ class Net:
         #   neuron's threshold, then move all threshold towards each neuron's
         #   base threshold.
         self.thresholds = self.thresholds + firing.dot(self.modConnections) + 0.25*(self.baseThresholds - self.thresholds)
-        # Add firing to history
-        self.history[:, 0] = firing
         # Create matrix of firing coincidences (where C[a, b] = 1 if b fired,
         #   and a fired on the last step), then multiply by the hebbian
         #   plasticity factor, to determine learning changes in network
@@ -318,14 +318,21 @@ class Net:
 
         return indices
 
-    def getOutput(self, indices=None, attributeName=None, attributeValue=None):
-        '''Get activations of neurons indicated by indices.
+    def getOutput(self, timeLag=0, indices=None, attributeName=None, attributeValue=None):
+        '''Get activations of neurons indicated by indices at the indicated time
+
+        Note that this will only get activations that are in the history; i.e.
+            manually set activations will not return from this function until
+            activate().
 
         Either indices or attributeName/attributeValue pair can be used to
             select neurons. If no selecting criteria are given, all neurons are
             selected.
 
         Arguments:
+            timeLag = (optional) integer indicating how many time steps back
+                to look in time. Default is 0 (most recent activations). Default
+                is 0.
             indices = (optional) either an iterable or slice object indicating
                 indices of neurons to get output from
             attributeName = (optional) the attribute name corresponding to the
@@ -339,7 +346,37 @@ class Net:
 
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
-        return self.activations[indices]
+        return self.history[indices, timeLag]
+
+    def getFiringRate(self, averagingTime=None, indices=None,
+        attributeName=None, attributeValue=None):
+        '''Get time-averaged firing rate of neurons indicated by indices
+
+        Either indices or attributeName/attributeValue pair can be used to
+            select neurons. If no selecting criteria are given, all neurons are
+            selected.
+
+        Arguments:
+            averagingTime = (optional) integer indicating how many time steps
+                back to look in time. Default is None, which means the entire
+                available history (set by the Net.historyLength property) is
+                used.
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to get output from
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given.
+            attributeValue = (optional) the attribute values to use to select
+                neurons to get output from
+
+        Returns:
+            The average firing rate of the selected neurons.
+          '''
+
+        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+
+        if averagingTime is None:
+            averagingTime = self.historyLength
+        return np.mean(self.history[indices, :averagingTime], axis=1)
 
     def addInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
         '''Set activations of neurons indicated by indices to given input values
@@ -768,7 +805,37 @@ class Net:
                 pass
 
 class Connectome:
-    '''A class representing a set of projecting populations'''
+    '''A class representing a set of projecting populations of neurons
+
+    This class represents a particular algorithm for randomly generating neural
+    networks (the Net class). A connectome object is meant to be loaded from
+    a set of parameters in a CSV file of a particular format (see the
+    Connectome.HEADER_ROW attribute for the formatting).
+
+    Each row in the CSV file provides the specification for one "projecting
+    population", which is a group of neurons that project to one or more other
+    regions. One named "region" can contain one or more projection populations.
+    Each projecting population has attributes specifying what numbers, types,
+    and strengths of connections to make to the downstream regions, as well
+    as neuronal attributes of the population neurons.
+
+    It's possible to load a Connectome object from a CSV file, and to store a
+    Connectome object as a CSV file.
+    '''
+
+    HEADER_ROW = [  # The header row for the connectome CSV spec file
+        'Region name',
+        'Downstream region names (comma separated for co-projections)',
+        'Population name',
+        'Projection proportions (same order as region names)',
+        'Number of neurons',
+        'Modulatory?',
+        'Mean,std neuron threshold',
+        'Mean,std refractory time',
+        'Mean,std number of connections per neuron',
+        'Mean,std connection strength',
+    ]
+
     def __init__(self, connectomeFile):
         '''Constructor for connectome class
 
@@ -856,6 +923,35 @@ class Connectome:
                     )
         return n
 
+    def encodeConnectomeSpec(self):
+        '''Convert the connectome back into connectome CSV text specification
+
+        Returns:
+            list of rows, where each row is a list of strings representing cells
+        '''
+
+        rows = []
+        for population in self.populations:
+            rows.append(population.encodePopulationSpec())
+        return rows
+
+    def save(self, file):
+        '''Save connectome as a connectome spec CSV file
+
+        See the sample connectome CSV files for the expected file format.
+
+        Arguments:
+            file = string or Path representing the path to a CSV file to save
+                connectome spec to
+        '''
+
+        rows = self.encodeConnectomeSpec()
+        with open(file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(Connectome.HEADER_ROW)
+            for row in rows:
+                writer.writerow(row)
+
 def boolParser(value):
     '''Parse a value as a boolean, allowing for strings "0" and "1"'''
     if type(value) == type(str()):
@@ -903,6 +999,7 @@ class ProjectingPopulation:
                 values representing the mean and stdev.
         '''
 
+        # Parse all text fields into usable population attributes
         self.regionName = regionA
         self.populationName = populationName
         (self.numNeurons,) = self.unpackParam(numNeurons, parser=int)
@@ -925,6 +1022,25 @@ class ProjectingPopulation:
         (self.modulatory,) = self.unpackParam(modulatory, parser=boolParser)
         (self.meanThreshold, self.stdThreshold) = self.unpackParam(thresholds, parser=float)
         (self.meanRefractoryPeriod, self.stdRefractoryPeriod) = self.unpackParam(refractoryPeriods, parser=float)
+
+    def encodePopulationSpec(self):
+        '''Convert the parameters back into a population specification'''
+
+        # Convert all attributes into text fields with the appropriate
+        #   formatting and grouping
+        regionA = self.regionName
+        regionsB = ','.join(self.connectedRegions)
+        populationName = self.populationName
+        proportions = ','.join([str(p) for p in self.connectionProbabilities])
+        numNeurons = str(self.numNeurons)
+        modulatory = '1' if self.modulatory else '0'
+        thresholds = '{mu},{sigma}'.format(mu=self.meanThreshold, sigma=self.stdThreshold)
+        refractoryPeriods = '{mu},{sigma}'.format(mu=self.meanRefractoryPeriod, sigma=self.stdRefractoryPeriod)
+        numConnections = '{mu},{sigma}'.format(mu=self.meanNumConnections, sigma=self.stdNumConnections)
+        connectionStrength = '{mu},{sigma}'.format(mu=self.meanConnectionStrength, sigma=self.stdConnectionStrength)
+
+        # Return all text fields in the expected order
+        return regionA, regionsB, populationName, proportions, numNeurons, modulatory, thresholds, refractoryPeriods, numConnections, connectionStrength
 
     def unpackParam(self, params, parser=float):
         '''Unpack parameters
