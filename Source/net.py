@@ -966,7 +966,7 @@ class Connectome:
         k = np.random.choice([idx for idx in range(len(self.populations)) if idx not in immutablePopulationIndices])
 
         mutatableParameters = [
-        
+
         ]
         numParameters = 0
         paramNum = np.random.choice(range(numParameters))
@@ -1214,7 +1214,23 @@ class Neuron:
         self.net.activations[self.index] = activation
 
 if __name__ == "__main__":
-    '''Code to run when this module is run directly, rather than imported'''
+    '''Code to run when this module is run directly, rather than imported
+
+    Preset run methods:
+
+    1. Create example layer topology:
+
+        python net.py layers
+
+    2. Use a connectome file:
+
+        python net.py connectomeFileName.csv
+
+    3. Create example chain topology:
+
+        python net.py chain
+
+    '''
 
     np.set_printoptions(linewidth=100000, formatter=dict(float=lambda x: "% 0.1f" % x))
 
@@ -1231,7 +1247,7 @@ if __name__ == "__main__":
         n.createLayers(nLayers=NL,  nIntraconnects=N, nInterconnects=N//10, mu=0.7, sigma=2, indices=regularIndices)
         majorGrouping = 'layer'
     elif initType == "connectome":
-        connectomeFile = 'TestConnectome.csv'
+        connectomeFile = sys.argv[2]
         pcg = Connectome(connectomeFile)
         n = pcg.createNet()
         majorGrouping = 'region'
