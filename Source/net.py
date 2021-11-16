@@ -892,7 +892,7 @@ class Connectome:
                 loc=self.populations[k].meanThreshold,
                 scale=self.populations[k].stdThreshold,
                 size=self.populations[k].numNeurons)
-            n.setThresholds(thresholds, attributeName='population', attributeValue=k, base=False, current=True)
+            n.setThresholds(thresholds, attributeName='population', attributeValue=k, setBase=False, setCurrent=True)
             # Set refractory periods
             refractoryPeriods = np.random.normal(
                 loc=self.populations[k].meanRefractoryPeriod,
@@ -951,6 +951,82 @@ class Connectome:
             writer.writerow(Connectome.HEADER_ROW)
             for row in rows:
                 writer.writerow(row)
+
+    def mutate(self, noProjectRegions=[], immutablePopulationIndices=[]):
+        '''Randomly make changes in the population parameters
+
+        Arguments:
+            noProjectRegions = (optional) a list of region names which may not
+                be projected to
+            immutablePopulationIndices = (optional) a list of population indices
+                that are immutable - may not be mutated, or removed
+        '''
+
+        # Choose a population index to mutate
+        k = np.random.choice([idx for idx in range(len(self.populations)) if idx not in immutablePopulationIndices])
+
+        mutatableParameters = [
+        
+        ]
+        numParameters = 0
+        paramNum = np.random.choice(range(numParameters))
+        if paramNum == 0:
+            # Mutate regions that are projected to (form a new projection to a
+            #   new region, or prune a projection)
+            allowableRegions = [r for r in self.regionsNames if r not in noProjectRegions]
+            numConnectedRegions = len(self.populations[k].connectedRegions)
+            if numConnectedRegions == len(allowableRegions):
+                # Max # of connected regions. Remove one
+                regionDelta = -1
+            elif numConnectedRegions == 0:
+                # Min # of connected regions. Add one
+                regionDelta = 1
+            else:
+                # Calculate probability of add vs remove
+                #   Add is more likely if # of connected regions is low
+                #   Remove is more likely is # of connected regions is high
+                #   If # of connected regions is equal to half the number of
+                #   allowable connected regions, probability is 50/50
+                deltaProbs = np.array([numConnectedRegions, len(allowableRegions) - numConnectedRegions])
+                deltaProbs = deltaProbs / np.sum(deltaProbs)
+                # Choose how many to add/remove
+                regionDelta = np.random.choice([-1, 1], p=deltaProbs)
+            if regionDelta > 0:
+                # Add one or more regions
+                unusedRegions = [r for r in allowableRegions if r not in self.populations[k].connectedRegions]
+                newConnectedRegions = np.random.choice(unusedRegions, size=regionDelta)
+                # Generate new connection probabilties
+                newConnectionProbabilties = np.random.random(size=regionDelta)
+                self.connectionProbabilities = np.append(self.connectionProbabilities * numConnectedRegions, newConnectionProbabilties)
+                self.connectionProbabilities = self.connectionProbabilities / np.sum(self.connectionProbabilities)
+            else:
+                # Remove one or more regions
+                removableRegionIndices = [idx for idx in range(numConnectedRegions) if idx not in immutablePopulationIndices]
+                indicesToRemove = np.random.choice(removableRegionIndices, size=-regionDelta)
+                self.connectedRegions = [r for j, r in enumerate(self.connectedRegions) if j not in indicesToRemove]
+                self.connectionProbabilities = np.delete(self.connectionProbabilities, indicesToRemove)
+        elif paramNum == 1:
+            pass
+        elif paramNum == 2:
+            pass
+        elif paramNum == 3:
+            pass
+        elif paramNum == 4:
+            pass
+        elif paramNum == 5:
+            pass
+        elif paramNum == 6:
+            pass
+        elif paramNum == 7:
+            pass
+        elif paramNum == 8:
+            pass
+        elif paramNum == 9:
+            pass
+        elif paramNum == 10:
+            pass
+        elif paramNum == 11:
+            pass
 
 def boolParser(value):
     '''Parse a value as a boolean, allowing for strings "0" and "1"'''
@@ -1013,12 +1089,12 @@ class ProjectingPopulation:
         else:
             (self.meanNumConnections, self.stdNumConnections) = self.unpackParam(numConnections, parser=float)
             (self.meanConnectionStrength, self.stdConnectionStrength) = self.unpackParam(connectionStrength, parser=float)
-        proportions = self.unpackParam(proportions, parser=float)
+        proportions = np.array(self.unpackParam(proportions, parser=float))
         if len(proportions) == 0:
             # No proportions given
-            self.connectionProbabilities = [1]
+            self.connectionProbabilities = np.array([1])
         else:
-            self.connectionProbabilities = [p/sum(proportions) for p in proportions]
+            self.connectionProbabilities = proportions / np.sum(proportions)
         (self.modulatory,) = self.unpackParam(modulatory, parser=boolParser)
         (self.meanThreshold, self.stdThreshold) = self.unpackParam(thresholds, parser=float)
         (self.meanRefractoryPeriod, self.stdRefractoryPeriod) = self.unpackParam(refractoryPeriods, parser=float)
