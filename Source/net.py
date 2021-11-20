@@ -854,8 +854,6 @@ class Connectome:
                     # Header row
                     continue
                 self.populations.append(ProjectingPopulation(*row))
-        # Calculate the total number of neurons
-        self.numNeurons = sum([p.numNeurons for p in self.populations])
         # Get a unique list of region names
         upstreamRegions = set(p.regionName for p in self.populations)
         downstreamRegions = set([region for p in self.populations for region in p.connectedRegions])
@@ -866,13 +864,6 @@ class Connectome:
         self.regionNameReverseMap = dict(zip(self.regionNames, range(len(self.regionNames))))
         self.populationIDs = []
         self.regionIDs = []
-        # Get a list of the population and region IDs of each neuron so we can make them attributes in the net later
-        for k in range(len(self.populations)):
-            # Create a list of population IDs - each population is within one region, and projects to a set of other regions
-            self.populationIDs.extend([k for j in range(self.populations[k].numNeurons)])
-            # Create a list of region IDs - each region is a named group of neurons
-            regionID = self.regionNameReverseMap[self.populations[k].regionName]
-            self.regionIDs.extend([regionID for j in range(self.populations[k].numNeurons)])
 
     def createNet(self, **kwargs):
         '''Construct net according to connectome specification
@@ -881,7 +872,22 @@ class Connectome:
             Any keyword arguments will be passed through to the Net constructor
         '''
 
-        n = Net(numNeurons=self.numNeurons, refractoryPeriodMean=4, refractoryPeriodSigma=3, **kwargs)
+        # Generation neuron count for each population
+        numNeurons = []
+        totalNumNeurons = 0
+        for k in range(len(self.populations)):
+            numNeurons.append(int(np.round(np.random.normal(loc=self.populations[k].meanNumNeurons, scale=self.populations[k].stdNumNeurons))))
+            totalNumNeurons += numNeurons[-1]
+
+        # Get a list of the population and region IDs of each neuron so we can make them attributes in the net later
+        for k in range(len(self.populations)):
+            # Create a list of population IDs - each population is within one region, and projects to a set of other regions
+            self.populationIDs.extend([k for j in range(numNeurons[k])])
+            # Create a list of region IDs - each region is a named group of neurons
+            regionID = self.regionNameReverseMap[self.populations[k].regionName]
+            self.regionIDs.extend([regionID for j in range(numNeurons[k])])
+
+        n = Net(numNeurons=totalNumNeurons, refractoryPeriodMean=4, refractoryPeriodSigma=3, **kwargs)
         # Set an attribute marking each neuron with its region number and population number
         n.setAttributes('population', values=self.populationIDs)
         n.setAttributes('region',     values=self.regionIDs, attributeMap=self.regionNameMap)
@@ -891,13 +897,13 @@ class Connectome:
             thresholds = np.random.normal(
                 loc=self.populations[k].meanThreshold,
                 scale=self.populations[k].stdThreshold,
-                size=self.populations[k].numNeurons)
+                size=numNeurons[k])
             n.setThresholds(thresholds, attributeName='population', attributeValue=k, setBase=False, setCurrent=True)
             # Set refractory periods
             refractoryPeriods = np.random.normal(
                 loc=self.populations[k].meanRefractoryPeriod,
                 scale=self.populations[k].stdRefractoryPeriod,
-                size=self.populations[k].numNeurons)
+                size=numNeurons[k])
             n.setRefractoryPeriods(refractoryPeriods, attributeName='population', attributeValue=k)
             # Get a list of region IDs that this population projects to
             connectedRegionIDs = [self.regionNameReverseMap[cr] for cr in self.populations[k].connectedRegions]
@@ -905,9 +911,7 @@ class Connectome:
                 # This region has no outgoing projections.
                 continue
             # Determine how many connections to make
-            print('nn = ', self.populations[k].numNeurons)
-            numConnections = self.populations[k].numNeurons * np.round(np.random.normal(loc=self.populations[k].meanNumConnections, scale=self.populations[k].stdNumConnections)).astype('int')
-            print('nc = ', numConnections)
+            numConnections = numNeurons[k] * np.round(np.random.normal(loc=self.populations[k].meanNumConnections, scale=self.populations[k].stdNumConnections)).astype('int')
             # Choose how many connections will go to each downstream regions
             connections = np.random.choice(connectedRegionIDs, size=numConnections, p=self.populations[k].connectionProbabilities)
             # Loop over each downstream region and add connections
@@ -964,17 +968,31 @@ class Connectome:
 
         # Choose a population index to mutate
         k = np.random.choice([idx for idx in range(len(self.populations)) if idx not in immutablePopulationIndices])
+        pop = self.populations[k]
 
-        mutatableParameters = [
-
+        mutableParameters = [
+            'connectedRegions',
+            'connectionProbabilities',
+            'meanThreshold',
+            'stdThreshold',
+            'meanRefractoryPeriod',
+            'stdRefractoryPeriod',
+            'meanNumConnections',
+            'stdNumConnections',
+            'meanConnectionStrength',
+            'stdConnectionStrength'
         ]
-        numParameters = 0
-        paramNum = np.random.choice(range(numParameters))
-        if paramNum == 0:
+
+        if len(pop.connectedRegions) == 0:
+            # Can't mutate connection probabilities if there are no connected regions
+            mutableParameters.remove('connectionProbabilities')
+
+        param = np.random.choice(mutableParameters)
+        if param == "connectedRegions":
             # Mutate regions that are projected to (form a new projection to a
             #   new region, or prune a projection)
-            allowableRegions = [r for r in self.regionsNames if r not in noProjectRegions]
-            numConnectedRegions = len(self.populations[k].connectedRegions)
+            allowableRegions = [r for r in self.regionNames if r not in noProjectRegions]
+            numConnectedRegions = len(pop.connectedRegions)
             if numConnectedRegions == len(allowableRegions):
                 # Max # of connected regions. Remove one
                 regionDelta = -1
@@ -993,40 +1011,39 @@ class Connectome:
                 regionDelta = np.random.choice([-1, 1], p=deltaProbs)
             if regionDelta > 0:
                 # Add one or more regions
-                unusedRegions = [r for r in allowableRegions if r not in self.populations[k].connectedRegions]
+                unusedRegions = [r for r in allowableRegions if r not in pop.connectedRegions]
                 newConnectedRegions = np.random.choice(unusedRegions, size=regionDelta)
+                pop.connectedRegions.extend(newConnectedRegions)
                 # Generate new connection probabilties
                 newConnectionProbabilties = np.random.random(size=regionDelta)
-                self.connectionProbabilities = np.append(self.connectionProbabilities * numConnectedRegions, newConnectionProbabilties)
-                self.connectionProbabilities = self.connectionProbabilities / np.sum(self.connectionProbabilities)
+                pop.connectionProbabilities = np.append(pop.connectionProbabilities * numConnectedRegions, newConnectionProbabilties)
+                pop.connectionProbabilities = pop.connectionProbabilities / np.sum(pop.connectionProbabilities)
             else:
                 # Remove one or more regions
                 removableRegionIndices = [idx for idx in range(numConnectedRegions) if idx not in immutablePopulationIndices]
                 indicesToRemove = np.random.choice(removableRegionIndices, size=-regionDelta)
-                self.connectedRegions = [r for j, r in enumerate(self.connectedRegions) if j not in indicesToRemove]
-                self.connectionProbabilities = np.delete(self.connectionProbabilities, indicesToRemove)
-        elif paramNum == 1:
-            pass
-        elif paramNum == 2:
-            pass
-        elif paramNum == 3:
-            pass
-        elif paramNum == 4:
-            pass
-        elif paramNum == 5:
-            pass
-        elif paramNum == 6:
-            pass
-        elif paramNum == 7:
-            pass
-        elif paramNum == 8:
-            pass
-        elif paramNum == 9:
-            pass
-        elif paramNum == 10:
-            pass
-        elif paramNum == 11:
-            pass
+                pop.connectedRegions = [r for j, r in enumerate(pop.connectedRegions) if j not in indicesToRemove]
+                pop.connectionProbabilities = np.delete(pop.connectionProbabilities, indicesToRemove)
+        elif param == "connectionProbabilities":
+            # Pick which probability to change
+            j = np.random.choice(range(len(pop.connectionProbabilities)))
+            prob = pop.connectionProbabilities[j]
+            # Provide lower limit of 0.1 to scale of random mutation distribution
+            scale = max(0.1, prob/2)
+            # Compute new randomly changed probability
+            newProb = np.random.normal(loc=prob, scale=scale)
+            pop.connectionProbabilities[j] = newProb
+            # Renormalize
+            pop.connectionProbabilities /= sum(pop.connectionProbabilities)
+        elif param in ["meanThreshold", "stdThreshold", "meanRefractoryPeriod",
+            "stdRefractoryPeriod", "meanNumConnections", "stdNumConnections",
+            "meanConnectionStrength", "stdConnectionStrength"]:
+            # Mutate one of the purely numerical parameters
+            val = getattr(pop, param)
+            # Compute scale of random variation - half the value, but at least 1.
+            scale = max(1, abs(val)/2)
+            newVal = np.random.normal(loc=val, scale=scale)
+            setattr(pop, param, newVal)
 
 def boolParser(value):
     '''Parse a value as a boolean, allowing for strings "0" and "1"'''
@@ -1053,7 +1070,10 @@ class ProjectingPopulation:
                 for the downstream regions. Must have the same # of proportions
                 as the # of regions in regionsB. The connections will be
                 distributed according to these weights.
-            numNeurons = the number of neurons in this projecting population
+            numNeurons = a string containing a comma-separated pair of numbers
+                indicating the mean and stdev of the number of neurons in this
+                population, or a tuple of numerical values representing the mean
+                and stdev
             modulatory = a boolean flag indicating whether the connections are
                 modulatory. This can be expressed as a string "0" or "1", or
                 as any other boolean-castable python type.
@@ -1078,7 +1098,7 @@ class ProjectingPopulation:
         # Parse all text fields into usable population attributes
         self.regionName = regionA
         self.populationName = populationName
-        (self.numNeurons,) = self.unpackParam(numNeurons, parser=int)
+        (self.meanNumNeurons,self.stdNumNeurons) = self.unpackParam(numNeurons, parser=int)
         self.connectedRegions = self.unpackParam(regionsB, parser=str)
         if len(self.connectedRegions) == 0:
             # No downstream connected regions given
@@ -1099,6 +1119,13 @@ class ProjectingPopulation:
         (self.meanThreshold, self.stdThreshold) = self.unpackParam(thresholds, parser=float)
         (self.meanRefractoryPeriod, self.stdRefractoryPeriod) = self.unpackParam(refractoryPeriods, parser=float)
 
+    def __str__(self):
+        connections = '|'.join('{r}({p:.02f})'.format(r=r, p=p) for r, p in zip(self.connectedRegions, self.connectionProbabilities))
+        return 'N={mn:.02f}+/-{sn:.02f} {r}==>{c} N={mc:.02f}+/-{sc:.02f} strength={ms:.02f}+/-{ss:.02f} refractory={mr:.02f}+/-{sr:.02f} threshold={mt:.02f}+/-{st:.02f}'.format(
+            mn=self.meanNumNeurons, sn=self.stdNumNeurons,
+            r=self.regionName, c=connections, mc=self.meanNumConnections,
+        )
+
     def encodePopulationSpec(self):
         '''Convert the parameters back into a population specification'''
 
@@ -1108,7 +1135,7 @@ class ProjectingPopulation:
         regionsB = ','.join(self.connectedRegions)
         populationName = self.populationName
         proportions = ','.join([str(p) for p in self.connectionProbabilities])
-        numNeurons = str(self.numNeurons)
+        numNeurons = '{mu},{sigma}'.format(mu=self.meanNumNeurons, sigma=self.stdNumNeurons)
         modulatory = '1' if self.modulatory else '0'
         thresholds = '{mu},{sigma}'.format(mu=self.meanThreshold, sigma=self.stdThreshold)
         refractoryPeriods = '{mu},{sigma}'.format(mu=self.meanRefractoryPeriod, sigma=self.stdRefractoryPeriod)
