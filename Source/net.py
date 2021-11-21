@@ -914,13 +914,157 @@ class Net:
 
         return self.getOutputSequence(np.s_[:T], indices=outputIndices)
 
+class ConnectomeEvolver:
+    '''A class that handles the evolution of a population of connectoms'''
+    def __init__(self, seedConnectomes, stimPatterns, targetPatterns,
+            randomizer=None, populationSize=100, keepFrac=0.2,
+            inputIndices=None, inputAttributeName=None, inputAttributeValue=None,
+            outputIndices=None, outputAttributeName=None, outputAttributeValue=None,
+            keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
+        '''Instantiate a ConnectomeEvolver
+
+        This defines how to start off the initial population, the inputs and
+            output definitions for the networks, and the target outputs that
+            the nets will be judged against
+
+        Arguments:
+            seedConnectomes = a list of one or more connectome CSV files or
+                loaded Connectome objects to serve as the progenitors.
+            stimPatterns = a list of one or more numpy arrays representing
+                stimulation patterns to apply to the network. Each array must
+                be numerical of size NxT, where N is the number of input
+                neurons, and T is the # of time steps over which the net will
+                be simulated.
+            targetPatterns = a list of one or more numpy arrays representing
+                the target pattern that net outputs will be judged against.
+                Each array should be MxTo, where M is the number of output
+                neurons, and To is the number of time steps over which the net
+                will be evaluated. It must be that To <= T
+            randomizer = (optional) a function that takes one stimPattern and
+                one targetPattern, and returns a randomized stimPattern and
+                targetPattern - for input augmentation purposes. Default is
+                0.1.
+            populationSize = (optional) the size of each generation. Default is
+                100.
+            keepFrac = (optional) the fraction of each population to keep.
+                Default is 0.1
+            inputIndices = (optional) either an iterable or slice object
+                indicating indices of neurons to set stimulation activation for
+            inputAttributeName = (optional) the attribute name corresponding to
+                the attribute values given
+            inputAttributeValue = (optional) the attribute value to use to
+                select neurons to set stimulation activations for
+            outputIndices = (optional) either an iterable or slice object
+                indicating indices of neurons to get output from
+            outputAttributeName = (optional) the attribute name corresponding to
+                the attribute values given
+            outputAttributeValue = (optional) the attribute value to use to
+                select neurons to get output from
+            keepSeeds = (optional) boolean flag indicating whether or not to
+                keep the unmodified seed connectomes in the output population
+            meanNumMutations = (optional) the mean number of mutations for each
+                generated connectome
+            stdNumMutations = (optional) the standard deviation of number of
+                mutations for each generated connectome
+        '''
+
+        # If any of the seed connectomes are string paths to csv files, load
+        #   them as Connectome objects.
+        for k in range(seedConnectomes):
+            if type(seedConnectomes[k]) == type(str()):
+                newConnectome = Connectome(seedConnectomes[k])
+            else:
+                newConnectome = seedConnectomes[k]
+                self.seeds.append()
+                self.population.append()
+
+        self.stimPatterns = stimPattersn
+        self.targetPatterns = targetPatterns
+        self.randomizer = randomizer
+        self.populationSize = populationSize
+        self.keepFrac = keepFrac
+        self.inputIndices = inputIndices
+        self.inputAttributeName = inputAttributeName
+        self.inputAttributeValue = inputAttributeValue
+        self.outputIndices = outputIndices
+        self.outputAttributeName = outputAttributeName
+        self.outputAttributeValue = outputAttributeValue
+        self.keepSeeds = keepSeeds
+        self.meanNumMutations = meanNumMutations
+        self.stdNumMutations = stdNumMutations
+
+    def fillPopulation(self, seedConnectomes, N, keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
+        '''Take a set of seed populations, and randomly propagate them.
+
+        Note that if keepSeeds is true, then the seeds will not be copies, but
+            the original references
+
+        Arguments:
+            seedConnectomes = either a list of connectome files, or a list of
+                loaded Connectome objects, to seed the population
+            N = desired size of population after propagation
+            keepSeeds = (optional) boolean flag indicating whether or not to
+                keep the unmodified seed connectomes in the output population
+            meanNumMutations = (optional) the mean number of mutations for each
+                generated connectome
+            stdNumMutations = (optional) the standard deviation of number of
+                mutations for each generated connectome
+
+        Returns:
+            A list of Connectome objects representing a randomly generated
+                population.
+        '''
+
+        newPopulation = []
+        if keepSeeds:
+            newPopulation = seedConnectomes
+        else:
+            newPopulation = []
+        childCount = N-length(newPopulation)
+        parents = np.random.choice(seedConnectomes, size=childCount)
+        mutationCounts = np.random.normal(loc=meanNumMutations, scale=stdNumMutations, size=childCount)
+        for k, parent in enumerate(parents):
+            child = parent.copy()
+            for m in range(mutationCounts[k]):
+                child.mutate()
+            newPopulation.append(child)
+        return newPopulation
+
+    def scoreConnectome(self, connectome, nNets):
+        '''Test the given Connectome object and give it a score
+
+        Each connectome will be used to generate nNets nets. The stimulation and
+            test patterns loaded into the ConnectomeEvolver object will be used
+            to test and evalulate each net.
+
+        Arguments:
+            connectome = a Connectome object
+            nNets = the number of nets each Connectome object will be used to
+                generate. The average score of the generated nets will be
+                reported for each Connectome object.
+
+        Returns:
+            A numerical score representing how accurately the nets generated
+                from the Connectome produced the target pattern on average.
+
+        '''
+        pass
+
+    def evolve(self, nGens):
+        '''Evolve a connectome object
+
+        Arguments:
+            nGens = number of generations to evolve
+        '''
+
 class Connectome:
     '''A class representing a set of projecting populations of neurons
 
     This class represents a particular algorithm for randomly generating neural
     networks (the Net class). A connectome object is meant to be loaded from
     a set of parameters in a CSV file of a particular format (see the
-    Connectome.HEADER_ROW attribute for the formatting).
+    Connectome.HEADER_ROW attribute for the formatting). It should be fully
+    interchangeably and interconvertible with the CSV file
 
     Each row in the CSV file provides the specification for one "projecting
     population", which is a group of neurons that project to one or more other
@@ -946,18 +1090,28 @@ class Connectome:
         'Mean,std connection strength',
     ]
 
-    def __init__(self, connectomeFile):
+    def __init__(self, connectomeFile=None, connectomeFileObject=None):
         '''Constructor for connectome class
 
-        For connectome file format specification, see example files.
+        Either a path to a connectome file, or a connectome file object must
+            be provided to read parameters from. For connectome file format
+            specification, see example connectome CSV files.
 
         Arguments:
             connectomeFile = the path to a connectome CSV file.
+            connectomeFileObject = a file like object containing connectome
+                parameters in CSV format
         '''
         self.populations = []
         # Open the connectome definition file
-        with open(connectomeFile, newline='') as csvfile:
-            reader = csv.reader(csvfile)
+        if connectomeFile is not None:
+            # User provided a file path
+            csvFile = open(connectomeFile, newline='')
+        elif connectomeFileObject is not None:
+            # User provided a file like object
+            csvFile = connectomeFileObject
+        with csvFile:
+            reader = csv.reader(csvFile)
             # Loop over rows and construct population projection objects
             for k, row in enumerate(reader):
                 if k == 0:
@@ -1049,6 +1203,31 @@ class Connectome:
             rows.append(population.encodePopulationSpec())
         return rows
 
+    def copy(self):
+        '''Return an independent copy of this Connectome object'''
+
+        connectomeCopy = None
+        with io.StringIO() as f:
+            self.streamToFile(f)
+            connectomeCopy = Connectome(f)
+
+        return connectomeCopy
+
+    def streamToFile(self, fileObject):
+        '''Write connectome data to a text file object in CSV format
+
+        See the sample connectome CSV files for the expected file format.
+
+        Arguments:
+            fileObject = a file-like object to save to.
+        '''
+
+        rows = self.encodeConnectomeSpec()
+        writer = csv.writer(fileObject)
+        writer.writerow(Connectome.HEADER_ROW)
+        for row in rows:
+            writer.writerow(row)
+
     def save(self, file):
         '''Save connectome as a connectome spec CSV file
 
@@ -1059,12 +1238,8 @@ class Connectome:
                 connectome spec to
         '''
 
-        rows = self.encodeConnectomeSpec()
         with open(file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(Connectome.HEADER_ROW)
-            for row in rows:
-                writer.writerow(row)
+            self.streamToFile(f)
 
     def mutate(self, noProjectRegions=[], immutablePopulationIndices=[]):
         '''Randomly make changes in the population parameters
