@@ -1426,12 +1426,14 @@ if __name__ == "__main__":
     #     print()
     axs[0, 0].set_ylabel('Neuron #')
     axs[0, 0].set_xlabel('Simulated time')
+    axs[0, 0].title.set_text('Raster')
     connIm = axs[0, 1].imshow(n.connections, cmap='seismic', interpolation='none')
     axs[0, 1].set_aspect('auto')
     cRadius = max(np.max(n.connections), abs(np.min(n.connections)))
     connIm.set_clim(-cRadius, cRadius)
     axs[0, 1].set_ylabel("Upstream neuron #")
     axs[0, 1].set_xlabel("Downstream neuron #")
+    axs[0, 1].title.set_text('Connection matrix')
 
     if majorGrouping is not None:
         groupNums = n.getUniqueAttributes(majorGrouping)
@@ -1440,5 +1442,10 @@ if __name__ == "__main__":
             if len(groupIdx) == 0:
                 continue
             axs[1, 0].plot(10*np.mean(np.flip(n.history[groupIdx, :], axis=1), axis=0) + (max(groupNums) - groupNum)*2)
+            axs[1, 0].title.set_text('Region-summed firing rate')
+
+    axs[1, 1].imshow(stim, cmap='binary', interpolation='none')
+    axs[1, 1].set_aspect('auto')
+    axs[1, 1].title.set_text('Stimulation pattern')
 
     plt.show()
