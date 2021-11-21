@@ -49,7 +49,6 @@ class Net:
                 Should be between 0 and 1 for biologically reasonable behavior.
           """
 
-        self.historyLength = historyLength
         if historyLength < 2:
             raise ValueError('historyLength must be at least 2, to allow for Hebbian learning.')
         self.numNeurons = numNeurons
@@ -59,7 +58,7 @@ class Net:
         self.baseModConnections = self.modConnections.copy()
         self.neurons = [Neuron(self, k) for k in range(self.numNeurons)]
         self.activations = np.zeros(self.numNeurons)
-        self.history = np.zeros([self.numNeurons, self.historyLength])
+        self.history = np.zeros([self.numNeurons, historyLength])
         self.hebbianPlasticityRate = hebbianPlasticityRate
         self.homeostaticPlasticityFactor = homeostaticPlasticityFactor
         if thresholds is None:
@@ -105,6 +104,16 @@ class Net:
         Not implemented yet.
         """
         pass
+
+    def changeHistoryLength(self, newLength):
+        oldLength = self.getHistoryLength()
+        if newLength > oldLength:
+            self.history = np.append(self.history, np.zeros([self.numNeurons, newLength-oldLength]))
+        elif oldLength > newLength:
+            self.history = self.history[:, :newLength]
+
+    def getHistoryLength(self):
+        return self.history.shape[1]
 
     def addAttribute(self, name, indices=None, initialValues=None, attributeMap=None):
         """Add an attribute to this net, allowing categorization of neurons.
@@ -348,6 +357,41 @@ class Net:
 
         return self.history[indices, timeLag]
 
+    def getOutputSequence(self, times, indices=None, attributeName=None, attributeValue=None):
+        '''Get activations of neurons indicated by indices at given timepoints
+
+        Note that this will only get activations that are in the history; i.e.
+            manually set activations will not return from this function until
+            activate().
+
+        Either indices or attributeName/attributeValue pair can be used to
+            select neurons. If no selecting criteria are given, all neurons are
+            selected.
+
+        Arguments:
+            times = sequence of time points to retrieve outputs from. 0 is the
+                most recent history, 1 is from one time step back, and so forth.
+                May be any numerical iterable, or a numpy slice object.
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to get output from
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given.
+            attributeValue = (optional) the attribute values to use to select
+                neurons to get output from
+
+        Returns:
+            The activations of the selected neurons.
+        '''
+
+        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+
+        print(type(indices))
+        print(indices)
+        print(type(times))
+        print(times)
+
+        return self.history[indices, times]
+
     def getFiringRate(self, averagingTime=None, indices=None,
         attributeName=None, attributeValue=None):
         '''Get time-averaged firing rate of neurons indicated by indices
@@ -375,10 +419,10 @@ class Net:
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
         if averagingTime is None:
-            averagingTime = self.historyLength
+            averagingTime = self.getHistoryLength()
         return np.mean(self.history[indices, :averagingTime], axis=1)
 
-    def addInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
+    def setInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
         '''Set activations of neurons indicated by indices to given input values
 
         Either indices or attributeName/attributeValue pair can be used to
@@ -399,6 +443,31 @@ class Net:
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
         self.activations[indices] = inputs
+
+    def addInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
+        '''Add input values to activations of neurons indicated by indices
+
+        Either indices or attributeName/attributeValue pair can be used to
+            select neurons. If no selecting criteria are given, all neurons are
+            selected.
+
+        Note that this is different from "setInput", because it adds to the
+            activations, rather than sets them.
+
+        Arguments:
+            inputs = an iterables of less than or equal length to numNeurons
+                indicating how much to add to the neuron's activation input
+            indices = (optional) either an iterable or slice object indicating
+                indices of neurons to set activations for
+            attributeName = (optional) the attribute name corresponding to the
+                attribute values given
+            attributeValue = (optional) the attribute value to use to select
+                neurons to set activations for
+        '''
+
+        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+
+        self.activations[indices] += inputs
 
     def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None,
             attributeName=None, attributeNameA=None, attributeValueA=None,
@@ -804,6 +873,47 @@ class Net:
             if visualize:
                 pass
 
+    def runSequence(self, inputs, inputIndices=None, inputAttributeName=None, inputAttributeValue=None, outputIndices=None, outputAttributeName=None, outputAttributeValue=None):
+        '''Run neural network with a sequence of inputs, and return the outputs.
+
+        Arguments:
+            inputs = An NxT series of inputs (N=# of input neurons, T=# of time
+                steps) to stimulate the net with. This also defines the number
+                of time steps to run.
+            inputIndices = (optional) either an iterable or slice object
+                indicating indices of neurons to set activations for
+            inputAttributeName = (optional) the attribute name corresponding to
+                the attribute values given
+            inputAttributeValue = (optional) the attribute value to use to
+                select neurons to set activations for
+            outputIndices = (optional) either an iterable or slice object
+                indicating indices of neurons to get output from
+            outputAttributeName = (optional) the attribute name corresponding to
+                the attribute values given
+            outputAttributeValue = (optional) the attribute value to use to
+                select neurons to get output from
+        '''
+
+        inputIndices = self.getIndices(indices=inputIndices, attributeName=inputAttributeName, attributeValue=inputAttributeValue)
+        outputIndices = self.getIndices(indices=outputIndices, attributeName=outputAttributeName, attributeValue=outputAttributeValue)
+
+        N, T = inputs.shape
+        if not N == len(inputIndices):
+            raise IndexError('Error, size of input axis 0 ({S}) should match the number of neurons selected ({N}).'.format(S=N, N=len(inputIndices)))
+
+        if T > self.getHistoryLength():
+            print('Expanding net history to accomodate sequence length')
+            self.changeHistoryLength(T)
+
+        for t in range(T):
+            print('{t} of {T}'.format(t=t+1, T=T))
+            self.addInput(inputs[:, t], indices=inputIndices)
+            # print('Applying total input:', np.sum(inputs[:, t]))
+            self.activate()
+            # print('Total activation:', np.sum(self.activations))
+
+        return self.getOutputSequence(np.s_[:T], indices=outputIndices)
+
 class Connectome:
     '''A class representing a set of projecting populations of neurons
 
@@ -911,7 +1021,7 @@ class Connectome:
                 # This region has no outgoing projections.
                 continue
             # Determine how many connections to make
-            numConnections = numNeurons[k] * np.round(np.random.normal(loc=self.populations[k].meanNumConnections, scale=self.populations[k].stdNumConnections)).astype('int')
+            numConnections = max(0, numNeurons[k] * np.round(np.random.normal(loc=self.populations[k].meanNumConnections, scale=self.populations[k].stdNumConnections)).astype('int'))
             # Choose how many connections will go to each downstream regions
             connections = np.random.choice(connectedRegionIDs, size=numConnections, p=self.populations[k].connectionProbabilities)
             # Loop over each downstream region and add connections
@@ -1263,44 +1373,47 @@ if __name__ == "__main__":
 
     initType = sys.argv[1]   #'connectome'
 
+    # Create blank stimulation matrix (neuron x time)
+    nInputs = 50
+    T = 500
+    stim = np.zeros([nInputs, T])
+    inIdx = range(nInputs)
+
     # Display summed activity over this grouping type:
     majorGrouping = None
     if initType == 'layers':
         N = 1000
         NL = N//100
-        n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7)
+        n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7, historyLength=T)
         regularIndices = np.arange(0, 1000)
         modulatoryIndices = np.arange(800, N)
         n.createLayers(nLayers=NL,  nIntraconnects=N, nInterconnects=N//10, mu=0.7, sigma=2, indices=regularIndices)
+        stim[0:10, 0] = 10
         majorGrouping = 'layer'
     elif initType == "connectome":
         connectomeFile = sys.argv[2]
-        pcg = Connectome(connectomeFile)
-        n = pcg.createNet()
+        co = Connectome(connectomeFile)
+        n = co.createNet(historyLength=T)
+        stim[0:10, 0] = 10
+        majorGrouping = 'region'
+    elif initType == "stim":
+        connectomeFile = sys.argv[2]
+        print('Running stimulation demo with connectome {c}'.format(c=connectomeFile))
+        co = Connectome(connectomeFile)
+        n = co.createNet(historyLength=T)
+        stim[:, ::10] = 10
+        inIdx = range(nInputs)
         majorGrouping = 'region'
     elif initType == "chain":
         N = 300
-        n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7)
+        n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7, historyLength=T)
         n.createChain()
-#        n.randomizeConnections(N//10, 0, 20)
+        stim[0, 0] = 10
 
+    nOutputs = 26
+    outIdx = range(n.numNeurons)[-nOutputs:]
 
-    # n.randomizeConnections(N*10, 0, 20, indicesA=modulatoryIndices, indicesB=regularIndices, modulatory=True)
-    # n.randomizeConnections(N*10, 0, 20, indicesA=regularIndices, indicesB=modulatoryIndices, modulatory=True)
-    #     n.randomizeConnections(N, 0.5, 2, attribute='layer', attributeValueA=0, attributeValueB=layerNum)
-
-    # layerNums = n.getUniqueAttributes('layer')
-    # for layerNum in layerNums:
-
-#    n.randomizeConnections(100, 2, 1)
-
-    # n.randomizeConnections(N*N, 0, 2)
-#    n.arrangeNeurons()
-#    n.showNet()
-    stim = np.zeros(n.numNeurons)
-    stim[0:10] = 10
-    n.addInput(stim)
-    n.run(n.historyLength)
+    output = n.runSequence(stim, inputIndices=inIdx, outputIndices=outIdx)
 
     f, axs = plt.subplots(2, 2, sharex='col', sharey='row', gridspec_kw={'height_ratios': [3, 1]})
     axs[0, 0].imshow(np.flip(n.history, axis=1), cmap='binary', interpolation='none') #, 'XData', np.arange(n.historyLength))
