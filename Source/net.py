@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 import matplotlib.patches as patches
 import csv
 import sys
+import re
 
 class Net:
     ROTATION = np.array([[0, -1], [1, 0]])
@@ -105,7 +106,7 @@ class Net:
         """
         pass
 
-    def changeHistoryLength(self, newLength):
+    def setHistoryLength(self, newLength):
         oldLength = self.getHistoryLength()
         if newLength > oldLength:
             self.history = np.append(self.history, np.zeros([self.numNeurons, newLength-oldLength]))
@@ -384,11 +385,6 @@ class Net:
         '''
 
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
-
-        print(type(indices))
-        print(indices)
-        print(type(times))
-        print(times)
 
         return self.history[indices, times]
 
@@ -873,8 +869,55 @@ class Net:
             if visualize:
                 pass
 
+    def runInteraction(self, interactor, inputIndices=None, inputAttributeName=None, inputAttributeValue=None, outputIndices=None, outputAttributeName=None, outputAttributeValue=None):
+        '''Run neural network with a pattern stimulation, and return the outputs
+
+        This differs from runSequence - instead of a predefined array of inputs
+            for each time point, this takes a Interactor object which can
+            deliver an output dependent stimulus. See the Interactor class.
+
+        Arguments:
+            interactor = an object that adheres to the same interface as the
+                BaseInteractor class. Provides stimulation and target output
+            inputIndices = (optional) either an iterable or slice object
+                indicating indices of neurons to set activations for
+            inputAttributeName = (optional) the attribute name corresponding to
+                the attribute values given
+            inputAttributeValue = (optional) the attribute value to use to
+                select neurons to set activations for
+            outputIndices = (optional) either an iterable or slice object
+                indicating indices of neurons to get output from
+            outputAttributeName = (optional) the attribute name corresponding to
+                the attribute values given
+            outputAttributeValue = (optional) the attribute value to use to
+                select neurons to get output from
+        '''
+
+        inputIndices = self.getIndices(indices=inputIndices, attributeName=inputAttributeName, attributeValue=inputAttributeValue)
+        outputIndices = self.getIndices(indices=outputIndices, attributeName=outputAttributeName, attributeValue=outputAttributeValue)
+
+        t = 0
+        while True:
+            try:
+                newInput = interactor.next(lastOutput=self.getOutput())
+            except StopIteration:
+                # Done stimulating
+                break;
+            print('Interaction #{t}'.format(t=t+1))
+            self.addInput(newInput, indices=inputIndices)
+            self.activate()
+            t = t + 1
+            if self.getHistoryLength() < t:
+                # Going to lose output if we don't expand history
+                self.setHistoryLength(t)
+
+        return self.getOutputSequence(np.s_[:T], indices=outputIndices)
+
     def runSequence(self, inputs, inputIndices=None, inputAttributeName=None, inputAttributeValue=None, outputIndices=None, outputAttributeName=None, outputAttributeValue=None):
         '''Run neural network with a sequence of inputs, and return the outputs.
+
+        This differs from runPattern - instead of Interactor object, input is
+            provided by a predefined array of inputs.
 
         Arguments:
             inputs = An NxT series of inputs (N=# of input neurons, T=# of time
@@ -903,159 +946,14 @@ class Net:
 
         if T > self.getHistoryLength():
             print('Expanding net history to accomodate sequence length')
-            self.changeHistoryLength(T)
+            self.setHistoryLength(T)
 
         for t in range(T):
             print('{t} of {T}'.format(t=t+1, T=T))
             self.addInput(inputs[:, t], indices=inputIndices)
-            # print('Applying total input:', np.sum(inputs[:, t]))
             self.activate()
-            # print('Total activation:', np.sum(self.activations))
 
         return self.getOutputSequence(np.s_[:T], indices=outputIndices)
-
-class ConnectomeEvolver:
-    '''A class that handles the evolution of a population of connectoms'''
-    def __init__(self, seedConnectomes, stimPatterns, targetPatterns,
-            randomizer=None, populationSize=100, keepFrac=0.2,
-            inputIndices=None, inputAttributeName=None, inputAttributeValue=None,
-            outputIndices=None, outputAttributeName=None, outputAttributeValue=None,
-            keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
-        '''Instantiate a ConnectomeEvolver
-
-        This defines how to start off the initial population, the inputs and
-            output definitions for the networks, and the target outputs that
-            the nets will be judged against
-
-        Arguments:
-            seedConnectomes = a list of one or more connectome CSV files or
-                loaded Connectome objects to serve as the progenitors.
-            stimPatterns = a list of one or more numpy arrays representing
-                stimulation patterns to apply to the network. Each array must
-                be numerical of size NxT, where N is the number of input
-                neurons, and T is the # of time steps over which the net will
-                be simulated.
-            targetPatterns = a list of one or more numpy arrays representing
-                the target pattern that net outputs will be judged against.
-                Each array should be MxTo, where M is the number of output
-                neurons, and To is the number of time steps over which the net
-                will be evaluated. It must be that To <= T
-            randomizer = (optional) a function that takes one stimPattern and
-                one targetPattern, and returns a randomized stimPattern and
-                targetPattern - for input augmentation purposes. Default is
-                0.1.
-            populationSize = (optional) the size of each generation. Default is
-                100.
-            keepFrac = (optional) the fraction of each population to keep.
-                Default is 0.1
-            inputIndices = (optional) either an iterable or slice object
-                indicating indices of neurons to set stimulation activation for
-            inputAttributeName = (optional) the attribute name corresponding to
-                the attribute values given
-            inputAttributeValue = (optional) the attribute value to use to
-                select neurons to set stimulation activations for
-            outputIndices = (optional) either an iterable or slice object
-                indicating indices of neurons to get output from
-            outputAttributeName = (optional) the attribute name corresponding to
-                the attribute values given
-            outputAttributeValue = (optional) the attribute value to use to
-                select neurons to get output from
-            keepSeeds = (optional) boolean flag indicating whether or not to
-                keep the unmodified seed connectomes in the output population
-            meanNumMutations = (optional) the mean number of mutations for each
-                generated connectome
-            stdNumMutations = (optional) the standard deviation of number of
-                mutations for each generated connectome
-        '''
-
-        # If any of the seed connectomes are string paths to csv files, load
-        #   them as Connectome objects.
-        for k in range(seedConnectomes):
-            if type(seedConnectomes[k]) == type(str()):
-                newConnectome = Connectome(seedConnectomes[k])
-            else:
-                newConnectome = seedConnectomes[k]
-                self.seeds.append()
-                self.population.append()
-
-        self.stimPatterns = stimPattersn
-        self.targetPatterns = targetPatterns
-        self.randomizer = randomizer
-        self.populationSize = populationSize
-        self.keepFrac = keepFrac
-        self.inputIndices = inputIndices
-        self.inputAttributeName = inputAttributeName
-        self.inputAttributeValue = inputAttributeValue
-        self.outputIndices = outputIndices
-        self.outputAttributeName = outputAttributeName
-        self.outputAttributeValue = outputAttributeValue
-        self.keepSeeds = keepSeeds
-        self.meanNumMutations = meanNumMutations
-        self.stdNumMutations = stdNumMutations
-
-    def fillPopulation(self, seedConnectomes, N, keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
-        '''Take a set of seed populations, and randomly propagate them.
-
-        Note that if keepSeeds is true, then the seeds will not be copies, but
-            the original references
-
-        Arguments:
-            seedConnectomes = either a list of connectome files, or a list of
-                loaded Connectome objects, to seed the population
-            N = desired size of population after propagation
-            keepSeeds = (optional) boolean flag indicating whether or not to
-                keep the unmodified seed connectomes in the output population
-            meanNumMutations = (optional) the mean number of mutations for each
-                generated connectome
-            stdNumMutations = (optional) the standard deviation of number of
-                mutations for each generated connectome
-
-        Returns:
-            A list of Connectome objects representing a randomly generated
-                population.
-        '''
-
-        newPopulation = []
-        if keepSeeds:
-            newPopulation = seedConnectomes
-        else:
-            newPopulation = []
-        childCount = N-length(newPopulation)
-        parents = np.random.choice(seedConnectomes, size=childCount)
-        mutationCounts = np.random.normal(loc=meanNumMutations, scale=stdNumMutations, size=childCount)
-        for k, parent in enumerate(parents):
-            child = parent.copy()
-            for m in range(mutationCounts[k]):
-                child.mutate()
-            newPopulation.append(child)
-        return newPopulation
-
-    def scoreConnectome(self, connectome, nNets):
-        '''Test the given Connectome object and give it a score
-
-        Each connectome will be used to generate nNets nets. The stimulation and
-            test patterns loaded into the ConnectomeEvolver object will be used
-            to test and evalulate each net.
-
-        Arguments:
-            connectome = a Connectome object
-            nNets = the number of nets each Connectome object will be used to
-                generate. The average score of the generated nets will be
-                reported for each Connectome object.
-
-        Returns:
-            A numerical score representing how accurately the nets generated
-                from the Connectome produced the target pattern on average.
-
-        '''
-        pass
-
-    def evolve(self, nGens):
-        '''Evolve a connectome object
-
-        Arguments:
-            nGens = number of generations to evolve
-        '''
 
 class Connectome:
     '''A class representing a set of projecting populations of neurons
@@ -1252,9 +1150,17 @@ class Connectome:
         '''
 
         # Choose a population index to mutate
-        k = np.random.choice([idx for idx in range(len(self.populations)) if idx not in immutablePopulationIndices])
-        pop = self.populations[k]
+        mutablePopulations = [idx for idx in range(len(self.populations)) if idx not in immutablePopulationIndices]
+        if len(mutablePopulations) == 0:
+            # Could change this so it generates a new randomized population
+            print('No mutable populations')
+            return
 
+        # Pick a population to mutate
+        popIndex = np.random.choice(mutablePopulations)
+        pop = self.populations[popIndex]
+
+        # Define mutable parameters - how should we mutate this population?
         mutableParameters = [
             'connectedRegions',
             'connectionProbabilities',
@@ -1265,14 +1171,36 @@ class Connectome:
             'meanNumConnections',
             'stdNumConnections',
             'meanConnectionStrength',
-            'stdConnectionStrength'
+            'stdConnectionStrength',
+            'duplicatePopulation',
+            'modulatory',
+            'removePopulation'
         ]
+
+        weights = np.array([
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+        ])
+
+        probabilities = weights / np.sum(weights)
 
         if len(pop.connectedRegions) == 0:
             # Can't mutate connection probabilities if there are no connected regions
             mutableParameters.remove('connectionProbabilities')
 
-        param = np.random.choice(mutableParameters)
+        # Choose how to mutate the chosen population
+        param = np.random.choice(mutableParameters, p=probabilities)
+
         if param == "connectedRegions":
             # Mutate regions that are projected to (form a new projection to a
             #   new region, or prune a projection)
@@ -1329,6 +1257,22 @@ class Connectome:
             scale = max(1, abs(val)/2)
             newVal = np.random.normal(loc=val, scale=scale)
             setattr(pop, param, newVal)
+        elif param == 'modulatory':
+            pop.modulatory = not pop.modulatory
+        elif param in ['duplicatePopulation']:
+            # Duplicate the population
+            newPop = pop.copy()
+            suffixMatch = re.search('.*?([0-9]+)', newPop.populationName)
+            if suffixMatch:
+                suffix = suffixMatch.group(1)
+                basePopulationName = newPop.populationName[:-len(suffix)]
+            else:
+                suffix = '0'
+                basePopulationName = newPop.populationName
+            newPop.populationName = basePopulationName + str(int(suffix)+1)
+            self.populations.append(newPop)
+        elif param in ['removePopulation']:
+            self.populations.pop(popIndex)
 
 def boolParser(value):
     '''Parse a value as a boolean, allowing for strings "0" and "1"'''
@@ -1410,6 +1354,9 @@ class ProjectingPopulation:
             mn=self.meanNumNeurons, sn=self.stdNumNeurons,
             r=self.regionName, c=connections, mc=self.meanNumConnections,
         )
+
+    def copy(self):
+        return ProjectingPopulation(*self.encodePopulationSpec())
 
     def encodePopulationSpec(self):
         '''Convert the parameters back into a population specification'''
