@@ -291,13 +291,19 @@ class Net:
         # Pass modulatory signals. Add the modulatory signal to the downstream
         #   neuron's threshold, then move all threshold towards each neuron's
         #   base threshold.
-        self.thresholds = self.thresholds + firing.dot(self.modConnections) + 0.25*(self.baseThresholds - self.thresholds)
-        # Create matrix of firing coincidences (where C[a, b] = 1 if b fired,
-        #   and a fired on the last step), then multiply by the hebbian
-        #   plasticity factor, to determine learning changes in network
-        hebbianPlasticity = np.outer(self.history[:, 1], firing) * self.hebbianPlasticityRate
-        # Create matrix to represent homeostatic relaxation of connection strengths
-        homeostaticPlasticity = (self.baseConnections - self.connections) * self.homeostaticPlasticityFactor
+        self.thresholds += firing.dot(self.modConnections) + 0.25*(self.baseThresholds - self.thresholds)
+        if self.hebbianPlasticityRate != 0:
+            # Create matrix of firing coincidences (where C[a, b] = 1 if b fired,
+            #   and a fired on the last step), then multiply by the hebbian
+            #   plasticity factor, to determine learning changes in network
+            hebbianPlasticity = np.outer(self.history[:, 1], firing) * self.hebbianPlasticityRate
+        else:
+            hebbianPlasticity = 0
+        if self.homeostaticPlasticityFactor != 0:
+            # Create matrix to represent homeostatic relaxation of connection strengths
+            homeostaticPlasticity = (self.baseConnections - self.connections) * self.homeostaticPlasticityFactor
+        else:
+            homeostaticPlasticity = 0
         self.connections += hebbianPlasticity + homeostaticPlasticity
 
     def getIndices(self, indices=None, attributeName=None, attributeValue=None):
