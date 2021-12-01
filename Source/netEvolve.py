@@ -178,23 +178,27 @@ class FeedbackInteractor(BaseInteractor):
         # Roll history array to make room for newest output
         np.roll(self.history, 1, axis=1)
         # Set new output
-        self.history[:, 0] = output
+        self.history[:, 0] = outputs
         # Average outputs over time
         firingRate = np.nanmean(self.history, axis=1)
         # Normalize firing rate
-        firingRate = firingRate / firingRate.sum()
+        mag = firingRate.sum()
+        if mag != 0:
+            firingRate = firingRate / firingRate.sum()
         # Calculate output score
-        score = self.scoreOutput(firingRate, targets)
-
+        score = self.scoreOutput(firingRate)
         if self.getTime() < self.timeSteps:
+            # Construct feedback array from score
             feedback = np.full(self.numFeedbackNeurons, score)
-            fullInputs = np.concatenate(self.inputs, feedback)
-            return self.inputs
+            # Add feedback inputs to end of regular imputs
+            fullInputs = np.concatenate([self.inputs, feedback])
+            return fullInputs
         else:
             raise StopIteration('End of stimulation pattern')
 
-    def scoreOutput(self, outputFiringRates, targetFiringRates):
-        score = np.linalg.norm(outputFiringRates - targetFiringRates)
+    def scoreOutput(self, outputFiringRates):
+        score = np.linalg.norm(outputFiringRates - self.targets)
+        return score
 
 class ConnectomeEvolver:
     '''A class that handles the evolution of a population of connectoms'''
