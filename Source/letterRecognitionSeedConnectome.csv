@@ -1,0 +1,8 @@
+Region name,Downstream region names (comma separated for co-projections),Population name,Projection proportions (same order as region names),"Mean,std number of neurons",Modulatory?,"Mean,std neuron threshold","Mean,std refractory time","Mean,std number of connections per neuron","Mean,std connection strength","Tags","Notes"
+"These are notes about the connectome overall"
+I,A,sensory,1,"784, 0",0,"2, 2","10, 5","100, 50","0.5, 5",,
+I,A,feedback,1,"10, 0",0,"2, 2","10, 5","100, 50","0.5, 5",,"This is a note"
+O,,output,,"26, 0",0,"2, 2","10, 5","100, 50","0.5, 5",,
+A,B,,1,"400, 50",0,"2, 2","10, 5","100, 50","0.5, 5","tag1,tag2",
+B,C,,1,"400, 50",0,"2, 2","10, 5","100, 50","0.5, 5",,
+C,O,,1,"200, 50",0,"2, 2","10, 5","100, 50","0.5, 5",,

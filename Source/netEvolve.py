@@ -1,17 +1,74 @@
 import numpy as np
+import net
+from pathlib import Path
+import multiprocessing as mp
 
 class BaseInteractor:
-    def __init__(self):
+    def __init__(self, targets=None, normalizeTargets=False, averagingTime=1):
         '''Initialize Interactor object
 
         This one returns empty stimulation arrays, but serves as an interface
-            for other Interactor classes.
+            for other Interactor classes. It has the base capability to
+            optionally  accept a target array at initialization, and score
+            output arrays against the target array.
+
+        Arguments:
+            targets = a 1D numpy array of target outputs, one per output neuron
+            averagingTime = (optional) an amount of time over which to
+                average output before scoring. Default is 1 (only one timestep)
+            normalizeTargets = (optional) boolean indicating that the targets
+                array is not normalized, and should be normalized. Note that
+                a copy of the targets array is not made before normalization,
+                so this can result in changes in the source array. If this is
+                a problem, just supply a copy of the target array, rather than
+                the original pointer.
         '''
         self.__t = -1
+        self.__history = None
+        self.__averagingTime = averagingTime
+        if (targets is not None) and normalizeTargets:
+            # Normalize target array
+            self.__targets = targets / targets.sum()
+        else:
+            self.__targets = targets
 
-    def next(self, *args, lastOutput=None, **kwargs):
+    def next(self, *args, lastOutputs=None, **kwargs):
+        '''Return the next set of stimuli for the network.
+
+        lastOutputs: A numpy array of outputs from the net. If provided, the
+            interactor may be able to provide closed loop feedback, as well as
+            calculate a score for the '''
+
+        if lastOutputs is not None:
+            # Update history with new net outputs if given.
+            if self.__history is None:
+                # Initialize history, since we now know the size of the output
+                #   array
+                self.__history = np.full([len(lastOutputs), self.__averagingTime], np.nan)
+            else:
+                # Roll history array to make room for newest output
+                self.__history = np.roll(self.__history, 1, axis=1)
+            # Set new output
+            self.__history[:, 0] = lastOutputs
+
         self.setTime(self.getTime() + 1)
         return []
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __add__(self, other):
+        if issubclass(type(other), BaseInteractor):
+            return ChainInteractor([self, other])
+        elif other == 0:
+            # Adding to zero has no effect. This is to allow the use of the
+            #   sum function with a list of interactors.
+            return self
+        else:
+            raise ValueError('Can only chain interactors, not objects of type {t}'.format(t=type(other)))
+
+    def __mul__(self, other):
+        return StackInteractor([self, other])
 
     def getTime(self):
         return self.__t
@@ -19,8 +76,50 @@ class BaseInteractor:
     def setTime(self, t):
         self.__t = t
 
+    def getTargets(self):
+        return self.__targets
+
+    def setTargets(self, newTargets):
+        deltaTargetSize = len(newTargets) - len(self.__targets)
+        if deltaTargetSize > 0:
+            # Need to change increase history size
+            self.__history = np.concatenate(self.__history, np.full([deltaTargetSize, self.__averagingTime], np.nan))
+        elif deltaTargetSize < 0:
+            self.__history = self.__history[:deltaTargetSize, :]
+
+        self.__targets = newTargets
+
+    def getHistory(self):
+        return self.__history
+
+    def scoreOutput(self):
+        '''Return a score representing how far the current average output vector
+            is to the target vector, by Euclidean distance.
+
+        Returns:
+            a numerical score, where the closer the number to zero, the more
+                precisely the average output matches the target vector.'''
+        if self.__targets is None:
+            raise ValueError('Cannot calculate score because target array has not been provided.')
+        if self.__history is None:
+            raise ValueError('Cannot calculate score because no outputs have been provided yet.')
+        # Average outputs over time
+        firingRate = np.nanmean(self.__history, axis=1)
+        # Normalize firing rate
+        mag = firingRate.sum()
+        if mag != 0:
+            firingRate = firingRate / firingRate.sum()
+        # Calculate output score
+        # print('history=   ', self.__history)
+        # print('type history=   ', type(self.__history))
+        # print('firingRate=', firingRate)
+        # print('__targets= ', self.__targets)
+        score = np.linalg.norm(firingRate - self.__targets)
+        return score
+
     def restart(self):
         '''Reset Interactor back to initial state'''
+        self.__history = None
         self.setTime(-1)
 
 class PredefinedInteractor(BaseInteractor):
@@ -45,7 +144,7 @@ class TonicInteractor(BaseInteractor):
     '''
 
     def __init__(self, inputs, timeSteps, *args, **kwargs):
-        ''' Initialize RepeatInteractor object
+        ''' Initialize TonicInteractor object
 
         Arguments:
             inputs = a 1D array of inputs, one per input neuron
@@ -62,6 +161,13 @@ class TonicInteractor(BaseInteractor):
             return self.inputs
         else:
             raise StopIteration('End of stimulation pattern')
+
+class NullInteractor(TonicInteractor):
+    '''This Interactor provides zero stimulation.'''
+
+    def __init__(self, numInputs, numTimeSteps, *args, **kwargs):
+        nullArray = np.zeros(numInputs)
+        super().__init__(nullArray, numTimeSteps, *args, **kwargs)
 
 class PatternInteractor(BaseInteractor):
     '''This Interactor will stimulate with the given input array following a
@@ -125,27 +231,150 @@ class ChainInteractor(BaseInteractor):
             # Ran out of interactors
             raise StopIteration('Final interactor in chain is complete.')
 
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __add__(self, other):
+        if issubclass(type(other), ChainInteractor):
+            # Concatenate the two together
+            return ChainInteractor(self.interactors + other.interactors)
+        elif other == 0:
+            # Adding to zero has no effect. This is to allow the use of the
+            #   sum function with a list of interactors.
+            return self
+        elif issubclass(type(other), BaseInteractor):
+            self.interactors.append(other)
+            return self
+        else:
+            raise ValueError('Can only chain interactors, not objects of type {t}'.format(t=type(other)))
+
+    def getTargets(self):
+        return self.interactors[self.interactorIdx].getTargets()
+    def setTargets(self, newTargets):
+        self.interactors[self.interactorIdx].setTargets(newTargets)
+    def getHistory(self):
+        return self.interactors[self.interactorIdx].getHistory()
+    def scoreOutput(self, interactorIdx=None, soFar=False, average=True):
+        '''Return the scores for one or more of the chained interactors
+
+        Return a list of output scores, one for each selected interactor, or
+          for all of them if interactorIdx is not provied.
+
+        Arguments:
+            interactorIdx = a list of interactor indices to select for scoring.
+                If None, all interactor scores are returned. Default is None.
+            soFar = a boolean flag indicating that only the interactors that
+                have run at least one time step should be scored. If soFar is
+                false, all of the interactors will be scored, and a ValueError
+                will be returned if some of the interactors have not run yet.
+                Default is False.
+            average = a boolean flag indicating that the output scores should be
+                averaged, rather than a list. Default is True
+        '''
+
+        scores = []
+
+        # Loop over sub interactors and get score from each
+        for idx, interactor in enumerate(self.interactors):
+            if interactorIdx is None or idx in interactorIdx:
+                # This is a selected interactor.
+                if soFar and interactor.history is None:
+                    # Only interactors that have run so far are requested, and
+                    #   this one hasn't run, so skip scoring it.
+                    continue
+                # Score the interaction and store the score.
+                scores.append(interactor.scoreOutput())
+
+        if average:
+            # Return average of the sub interactor scores
+            return np.mean(scores)
+        else:
+            # Return the sub interactor scores separately
+            return scores
+
+    def restart(self, *args, **kwargs):
+        super().restart(*args, **kwargs)
+        self.interactorIdx = 0
+
+class StackInteractor(BaseInteractor):
+    '''This interactor will stack stimulation patterns of multiple interactors.
+
+    NOT FULLY IMPLEMENTED YET
+
+    This will allow more complex stimulation patterns. The stimulation input
+        each interactor produces will be stacked on top of each other in the
+        order the interactors are provided. So, if there are two interactors,
+        and one interactor produces an input of [3, 2, 0, 6] and the next
+        produces [3, 3, 2], the stacked interactor will produce
+        [3, 2, 0, 6, 3, 3, 2]. Note that the interactor will terminate whenever
+        the first interactor is complete, even if the other one is not.
+
+    To use this, instantiate multiple other Interactor objects, then pass them
+        to the StackInteractor constructor.'''
+
+    def __init__(self, interactors, *args, terminateOnFirst=True, **kwargs):
+        ''' Initialize StackInteractor object
+
+        Arguments:
+            interactors = a list of Interactor objects to be stacked
+            terminateOnFirst = (optional) boolean flag indicating whether or not
+                to stop when first subinteractor finishes. If False, the
+                stimulation will continue until the last interactor has
+                finished. If true, the stimulation will terminate when any one
+                interactor has finished. Default is True. NOT IMPLEMENTED YET
+        '''
+        super().__init__(*args, **kwargs)
+        self.interactors = interactors
+
+    def next(self, *args, **kwargs):
+        super().next(*args, **kwargs)
+        try:
+            # Return results of current interactor
+            input = []
+            for interactor in self.interactors:
+                input.extend(interactor.next(*args, **kwargs))
+            return input
+        except StopIteration:
+            # An interactor has completed, terminate
+            raise StopIteration('Stacked interactor stimulation has completed.')
+
+    def __mul__(self, other):
+        if type(other) == StackInteractor:
+            # Stack the two together
+            return StackInteractor(self.interactors + other.interactors)
+        else:
+            if issubclass(type(other), BaseInteractor):
+                self.interactors.append(other)
+                return self
+            else:
+                raise ValueError('Can only chain interactors, not objects of type {t}'.format(t=type(other)))
+
+    def getTargets(self):
+        return self.interactors[self.interactorIdx].getTargets()
+    def setTargets(self, newTargets):
+        self.interactors[self.interactorIdx].setTargets(newTargets)
+    def getHistory(self):
+        return self.interactors[self.interactorIdx].getHistory()
+    def scoreOutput(self):
+        return self.interactors[self.interactorIdx].scoreOutput()
+
 class FeedbackInteractor(BaseInteractor):
-    '''This Interctor will stimulate with the given input over and over for the
-        given number of time steps, but will provide feedback to a second set
-        of input neurons proportional to the euclidean distance between the
-        net's output and the target pattern.
+    '''This Interctor will stimulate using a sub-interactor, but will also
+        provide feedback to a second set of input neurons proportional to the
+        euclidean distance between the net's output and the given target
+        pattern.
     '''
 
-    def __init__(self, inputs, targets, numFeedbackNeurons, timeSteps, *args,
-                    feedbackAveragingTime=1, feedbackTimeSteps=None, **kwargs):
+    def __init__(self, subInteractor, numFeedbackNeurons, *args,
+                    feedbackTimeSteps=None, **kwargs):
         ''' Initialize FeedbackInteractor object
 
         Arguments:
-            inputs = a 1D numpy array of inputs, one per input neuron
-            targets = a 1D numpy array of target outputs, one per output neuron
+            subInteractor = an Interactor object that will be used to deliver
+                the primary stimulation and score the output
             numFeedbackNeurons = number of neurons to provide error
                 feedback to. The feedback will be tacked onto the end of the
                 inputs.
-            timeSteps = an integer indicating how many timesteps to stimulate
-                for
-            feedbackAveragingTime = (optional) an amount of time over which to
-                average output before scoring. Default is 1 (only one timestep)
             feedbackTimeSteps = (optional) number of timesteps for which to
                 provide feedback for. After this time elapses, no feedback
                 will be provided. Default is None, which means feedback will
@@ -153,61 +382,49 @@ class FeedbackInteractor(BaseInteractor):
                 argument.
         '''
         super().__init__(*args, **kwargs)
-        self.inputs = inputs
-        self.targets = targets / targets.sum()
+        self.subInteractor = subInteractor
         self.numFeedbackNeurons = numFeedbackNeurons
-        self.timeSteps = timeSteps
-        self.feedbackAveragingTime = feedbackAveragingTime
-        if feedbackTimeSteps is None:
-            # User did not specify amount of time to provide feedback, so we
-            #   will provide feedback for the full time.
-            self.feedbackTimeSteps = self.timeSteps
-        else:
-            self.feedbackTimeSteps = feedbackTimeSteps
-        # We will dynamically initialize history, because we don't know how
-        #   many output neurons there will be.
-        self.history = None
+        self.feedbackTimeSteps = feedbackTimeSteps
+        self.latestScore = None
 
-    def next(self, outputs, *args, **kwargs):
+    def next(self, *args, **kwargs):
         super().next(*args, **kwargs)
 
-        if self.history is None:
-            # Initialize history
-            self.history = np.full([len(outputs), self.feedbackAveragingTime], np.nan)
-
-        # Roll history array to make room for newest output
-        np.roll(self.history, 1, axis=1)
-        # Set new output
-        self.history[:, 0] = outputs
-        # Average outputs over time
-        firingRate = np.nanmean(self.history, axis=1)
-        # Normalize firing rate
-        mag = firingRate.sum()
-        if mag != 0:
-            firingRate = firingRate / firingRate.sum()
-        # Calculate output score
-        score = self.scoreOutput(firingRate)
-        if self.getTime() < self.timeSteps:
+        # Get primary stimulation from subinteractor
+        inputs = self.subInteractor.next(*args, **kwargs)
+        # Get score from sub interactor
+        self.latestScore = self.subInteractor.scoreOutput()
+        if self.feedbackTimeSteps is None or self.getTime() < self.feedbackTimeSteps:
             # Construct feedback array from score
-            feedback = np.full(self.numFeedbackNeurons, score)
-            # Add feedback inputs to end of regular imputs
-            fullInputs = np.concatenate([self.inputs, feedback])
-            return fullInputs
+            feedback = np.full(self.numFeedbackNeurons, self.latestScore)
         else:
-            raise StopIteration('End of stimulation pattern')
+            feedback = np.full(self.numFeedbackNeurons, np.NaN)
+        # Add feedback inputs to end of regular imputs
+        fullInputs = np.concatenate([inputs, feedback])
+        return fullInputs
 
-    def scoreOutput(self, outputFiringRates):
-        score = np.linalg.norm(outputFiringRates - self.targets)
-        return score
+    def getTargets(self):
+        return self.subInteractor.getTargets()
+    def setTargets(self, newTargets):
+        self.subInteractor.setTargets(newTargets)
+    def getHistory(self):
+        return self.subInteractor.getHistory()
+    def scoreOutput(self):
+        if self.latestScore is None:
+            # We haven't already scored the last output
+            return self.subInteractor.scoreOutput()
+        else:
+            # We've already scored the last output - just return that score.
+            return self.latestScore
 
 class ConnectomeEvolver:
     '''A class that handles the evolution of a population of connectoms'''
-    def __init__(self, seedConnectomes, stimPatterns, targetPatterns,
-            randomizer=None, populationSize=100, keepFrac=0.2,
-            inputIndices=None, inputAttributeName=None, inputAttributeValue=None,
-            outputIndices=None, outputAttributeName=None, outputAttributeValue=None,
-            keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
+    def __init__(self, seedConnectomes, interactors,
+            populationSize=100, keepFrac=0.2, inputRegion="I", outputRegion="O",
+            keepSeeds=False, meanNumMutations=2,
+            stdNumMutations=0.5):
         '''Instantiate a ConnectomeEvolver
+
 
         This defines how to start off the initial population, the inputs and
             output definitions for the networks, and the target outputs that
@@ -216,74 +433,50 @@ class ConnectomeEvolver:
         Arguments:
             seedConnectomes = a list of one or more connectome CSV files or
                 loaded Connectome objects to serve as the progenitors.
-            stimPatterns = a list of one or more numpy arrays representing
-                stimulation patterns to apply to the network. Each array must
-                be numerical of size NxT, where N is the number of input
-                neurons, and T is the # of time steps over which the net will
-                be simulated.
-            targetPatterns = a list of one or more numpy arrays representing
-                the target pattern that net outputs will be judged against.
-                Each array should be MxTo, where M is the number of output
-                neurons, and To is the number of time steps over which the net
-                will be evaluated. It must be that To <= T
-            randomizer = (optional) a function that takes one stimPattern and
-                one targetPattern, and returns a randomized stimPattern and
-                targetPattern - for input augmentation purposes. Default is
-                0.1.
+            interactors = a list of one or more Interactor objects (any
+                subclass of the BaseInteractor class) that will provide the
+                stimulation and output scoring for the networks
             populationSize = (optional) the size of each generation. Default is
                 100.
             keepFrac = (optional) the fraction of each population to keep.
                 Default is 0.1
-            inputIndices = (optional) either an iterable or slice object
-                indicating indices of neurons to set stimulation activation for
-            inputAttributeName = (optional) the attribute name corresponding to
-                the attribute values given
-            inputAttributeValue = (optional) the attribute value to use to
-                select neurons to set stimulation activations for
-            outputIndices = (optional) either an iterable or slice object
-                indicating indices of neurons to get output from
-            outputAttributeName = (optional) the attribute name corresponding to
-                the attribute values given
-            outputAttributeValue = (optional) the attribute value to use to
-                select neurons to get output from
             keepSeeds = (optional) boolean flag indicating whether or not to
                 keep the unmodified seed connectomes in the output population
             meanNumMutations = (optional) the mean number of mutations for each
                 generated connectome
             stdNumMutations = (optional) the standard deviation of number of
                 mutations for each generated connectome
+            inputRegion = A region to be used for input. This region will never
+                be mutated. Note that the seed connectomes must have a region
+                by this name with enough neurons for the expected input
+            outputRegion = A region to be used for output. This region will
+                never be mutated. Note that the seed connectomes must have a
+                region by this name with enough neurons for the expected output
         '''
 
         # If any of the seed connectomes are string paths to csv files, load
         #   them as Connectome objects.
-        for k in range(seedConnectomes):
-            if type(seedConnectomes[k]) == type(str()):
-                newConnectome = Connectome(seedConnectomes[k])
+        self.seeds = []
+        for seedConnectome in seedConnectomes:
+            if type(seedConnectome) == type(str()):
+                newConnectome = Connectome(seedConnectome)
+            elif issubclass(type(seedConnectome), net.Connectome):
+                newConnectome = seedConnectome
             else:
-                newConnectome = seedConnectomes[k]
-                self.seeds.append()
-                self.population.append()
-
-        self.stimTargetPairs = zip(stimPatterns, targetPatterns)
-        if randomizer is None:
-            # No randomizer given, make an identity "randomizer"
-            self.randomizer = lambda stimPattern, targetPattern: (stimPattern, targetPattern)
-        else:
-            self.randomizer = randomizer
+                raise ValueError('Seed connectomes must be either strings representing paths to connectome files, or net.Connectome objects')
+            self.seeds.append(newConnectome)
+        self.population = []
+        self.interactors = interactors
         self.populationSize = populationSize
         self.keepFrac = keepFrac
-        self.inputIndices = inputIndices
-        self.inputAttributeName = inputAttributeName
-        self.inputAttributeValue = inputAttributeValue
-        self.outputIndices = outputIndices
-        self.outputAttributeName = outputAttributeName
-        self.outputAttributeValue = outputAttributeValue
+        self.inputRegion = inputRegion
+        self.outputRegion = outputRegion
         self.keepSeeds = keepSeeds
         self.meanNumMutations = meanNumMutations
         self.stdNumMutations = stdNumMutations
 
     def fillPopulation(self, seedConnectomes, N, keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
-        '''Take a set of seed populations, and randomly propagate them.
+        '''Take a seed populations, and randomly propagate them.
 
         Arguments:
             seedConnectomes = either a list of connectome files, or a list of
@@ -306,29 +499,29 @@ class ConnectomeEvolver:
             newPopulation = [c.copy() for c in seedConnectomes]
         else:
             newPopulation = []
-        childCount = N-length(newPopulation)
+        childCount = N-len(newPopulation)
         parents = np.random.choice(seedConnectomes, size=childCount)
-        mutationCounts = np.random.normal(loc=meanNumMutations, scale=stdNumMutations, size=childCount)
+        mutationCounts = np.random.normal(loc=meanNumMutations, scale=stdNumMutations, size=childCount).round().astype('int')
         for k, parent in enumerate(parents):
             child = parent.copy()
             for m in range(mutationCounts[k]):
-                child.mutate()
+                child.mutate(immutableRegions=[self.inputRegion, self.outputRegion])
             newPopulation.append(child)
         return newPopulation
 
     def scoreConnectome(self, connectome, nNets, testsPerNet):
         '''Test the given Connectome object and give it a score
 
-        Each connectome will be used to generate nNets nets. The stimulation and
-            test patterns loaded into the ConnectomeEvolver object will be used
-            to test and evalulate each net.
+        Each connectome will be used to generate nNets nets. The interactors
+            loaded into the ConnectomeEvolver object will be used to test and
+            evalulate each net.
 
         Arguments:
             connectome = a Connectome object
             nNets = the number of nets each Connectome object will be used to
                 generate. The average score of the generated nets will be
                 reported for each Connectome object.
-            testsPerNet = number of stim/target pairs to randomly choose and
+            testsPerNet = number of interactor objects to randomly choose and
                 test each generated net on
 
         Returns:
@@ -340,18 +533,28 @@ class ConnectomeEvolver:
         # Generate a list of stim/target pairs, with appropriate randomization,
         #   to test each net on
         for k in range(nNets):
-            stimTargetPairs = [self.randomizer(stim, target) for stim, target in np.random.choice(self.stimTargetPairs, size=testsPerNet)]
-            for stim, target in stimTargetPairs:
-                subScores = []
-                n = connectome.createNet()
-                output = n.runSequence(self.stimPattern,
-                    inputIndices=self.inputIndices, inputAttributeName=self.inputAttributeName,  inputAttributeValue=self.inputAttributeValue,
-                    outputIndices=self.outputIndices, outputAttributeName=self.outputAttributeName, outputAttributeValue=self.outputAttributeValue)
-                score = self.scoreOutput(output, target)
-                scores.append(score)
-        return np.mean(scores)
+            # Create a chain interactor with all the randomly chosen interactors
+            #   chained one after another.
+            print('        Creating net #{n} of {nn}'.format(n=k+1, nn=nNets))
+            interactor = sum(np.random.choice(self.interactors, size=testsPerNet))
+            subScores = []
+            n = connectome.createNet()
+            output = n.runInteraction(interactor,
+                inputAttributeName='region',
+                inputAttributeValue=self.inputRegion,
+                inputMapped=True,
+                outputAttributeName='region',
+                outputAttributeValue=self.outputRegion,
+                outputMapped=True)
+            score = interactor.scoreOutput()
+            scores.append(score)
+            print('            Net score: {s}'.format(s=score))
 
-    def scoreOutput(self, output, target, normalizeTarget=False):
+        finalScore = np.mean(scores)
+        print('    Connectome score = {s}'.format(s=finalScore))
+        return finalScore
+
+    def scoreOutput(self, output, target, normalizeTargets=False):
         '''Score an output matrix by comparing it to a target output matrix
 
         Arguments:
@@ -382,13 +585,16 @@ class ConnectomeEvolver:
 
         return score
 
-    def evolve(self, nGens, saveDir, saveAllGenerations=False):
+    def evolve(self, nGens=10, nNets=10, testsPerNet=3, saveDir='.', saveName='survivor',
+        saveAllGenerations=False, numWorkers=None):
         '''Evolve a connectome object
 
         Arguments:
             nGens = number of generations to evolve
             saveDir = path to a directory in which to put the generation folders
                 with the saved connectomes.
+            saveName = a string to prepend to the saved survivor connectome
+                files
             saveAllGenerations = a boolean flag indicating whether to save
                 every connectome, or only the last generation ones.
             keepSeeds = (optional) boolean flag indicating whether or not to
@@ -397,19 +603,61 @@ class ConnectomeEvolver:
                 generated connectome
             stdNumMutations = (optional) the standard deviation of number of
                 mutations for each generated connectome
+            numWorkers = (optional) number of parallel processes to use to
+                evaluate connectomes. Default is None, which means the
+                connectomes will be evaluated serially in a single process.
         '''
 
+        self.population = self.seeds
         for g in range(nGens):
-            print('Running generation #{g}'.format(g=g))
-            self.population = self.fillPopulation(self.seeds, self.populationSize, keepSeeds=True, meanNumMutations=2, stdNumMutations=0.5)
+            print('Running generation #{g} of {gn}'.format(g=g, gn=nGens))
+            self.population = self.fillPopulation(self.population, self.populationSize, keepSeeds=True, meanNumMutations=2, stdNumMutations=0.5)
             scores = []
-            for c in self.population:
-                scores.append(self.scoreConnectome(co))
+            if numWorkers is None:
+                for k, co in enumerate(self.population):
+                    print('    Testing connectome #{k} of {kn}'.format(k=k+1, kn=len(self.population)))
+                    scores.append(self.scoreConnectome(co, nNets=nNets, testsPerNet=testsPerNet))
+            else:
+                with mp.Pool(processes=numWorkers) as pool:
+                    results = []
+                    for k, co in enumerate(self.population):
+                        print('    Testing connectome #{k} of {kn}'.format(k=k+1, kn=len(self.population)))
+                        result = pool.apply_async(self.scoreConnectome, (co,), dict(nNets=nNets, testsPerNet=testsPerNet))
+                        results.append(result)
+                    print('    Waiting for results...')
+                    scores = [result.get() for result in results]
             # Sort population and scores
-            sortedPopulation, sortedScores = zip(*[p[0] for p in sorted(zip(scores, self.population), key=lambda p:p[0])])
+            sortedPopulation, sortedScores = zip(*sorted(zip(self.population, scores), key=lambda p:p[1]))
             numToKeep = round(self.keepFrac * len(self.population))
             survivors = sortedPopulation[0:numToKeep]
             survivorScores = sortedScores[0:numToKeep]
+            if saveAllGenerations or g == nGens-1:
+                print('Saving {n} survivors.'.format(n=numToKeep))
+                for k in range(numToKeep):
+                    savePath = Path(saveDir) / '{n}_gen{g:03d}_score{s:.2e}.csv'.format(n=saveName, g=g, s=survivorScores[k])
+                    print('Saving survivor #{k}'.format(k=k))
+                    survivors[k].save(savePath)
             self.population = survivors
             print('Survivor scores:')
             print(survivorScores)
+
+if __name__ == "__main__":
+    stim1 = np.array([[1, 2, 3, 4], [11, 22, 33, 44], [111, 222, 333, 444]]);
+    targets = np.array([-1, -3, 0, -1, 4])
+    pi = PredefinedInteractor(stim1, targets=targets, normalizeTargets=True)
+    stim2 = np.array([7, 7, 1, 0])
+    ti = TonicInteractor(stim2, 10, targets=targets, normalizeTargets=True, averagingTime=5)
+    stim3 = np.array([123, 234, 345, 456])
+    pat3 = np.array([0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0])
+    pati = PatternInteractor(stim3, pat3, targets=targets, normalizeTargets=True)
+    chi = pi + ti + pati
+    ni = NullInteractor(5, 15, targets=[0, 0, 0, 0, 0])
+    fbi = FeedbackInteractor(ti, 3)
+    iact = fbi + fbi + fbi
+    while True:
+        try:
+            print('Stim:', iact.next(lastOutputs=np.random.rand(5)))
+            print('History:', iact.getHistory())
+            print('Score:', iact.scoreOutput())
+        except StopIteration:
+            break;
