@@ -4,12 +4,13 @@ import numpy as np
 import net
 import netEvolve as ne
 from PIL import Image
+import sys
 
 TRANSPOSE = Image.Transpose.TRANSPOSE
 letters = 'abcdefghijklmnopqrstuvwxyz'
 
 def showImage(k, images, labels):
-    letter = letters[labels[k][0]-1]
+    letter = letters[labels[k]-1]
     Image.fromarray(images[k, :].reshape([28, 28])).transpose(method=TRANSPOSE).show(title=letter)
 
 # EMNIST datset:
@@ -40,18 +41,37 @@ if __name__ == '__main__':
 
     numFeedbackNeurons = 10
     interactors = []
-    trainTime = 100
+    trainTime = 500
     numInputNeurons = imageSize + numFeedbackNeurons
 
     numTrainingImages = 1000
     trainingImageIndices = list(range(numTrainingImages))
 
-    populationSize=10
-    nGens=1
-    netsPerConnectome=2
-    testsPerNet=1
-    numWorkers=None
+    debugMode = True
+
+    if debugMode:
+        populationSize=10
+        nGens=1
+        netsPerConnectome=2
+        testsPerNet=3
+        numWorkers=None
+    else:
+        populationSize=100
+        nGens=10
+        netsPerConnectome=10
+        testsPerNet=5
+        numWorkers=8
     saveDir = r'D:\Dropbox\Documents\Work\Cornell Lab Tech\Projects\psynapse\Source\evolveSessions\emnist_learner'
+    if len(sys.argv) < 2:
+        seedPath = 'letterRecognitionSeedConnectome.csv'
+    else:
+        seedPath = sys.argv[1]
+    if len(sys.argv) < 3:
+        mode = 'evolve'
+    else:
+        mode = sys.argv[2]
+
+    print('Using seed {s}'.format(s=seedPath))
 
     for k in trainingImageIndices:
         # Stimulus is a flattened image 1D array
@@ -65,10 +85,35 @@ if __name__ == '__main__':
         # plt.gca().title.set_text(str(labels[k]))
         # plt.show()
 
-    seedConnectomes = [net.Connectome('letterRecognitionSeedConnectome.csv')]
-    print('pops: ', seedConnectomes[0].populations)
-    ce = ne.ConnectomeEvolver(seedConnectomes, interactors, populationSize=populationSize, inputRegion='I', outputRegion='O')
-    ce.evolve(nGens=nGens, nNets=netsPerConnectome, testsPerNet=testsPerNet, saveDir=saveDir, saveName='emnist', numWorkers=numWorkers)
+    if mode == 'evolve':
+        seedConnectomes = [net.Connectome(seedPath)]
+        print('pops: ', seedConnectomes[0].populations)
+        ce = ne.ConnectomeEvolver(seedConnectomes, interactors, populationSize=populationSize, inputRegion='I', outputRegion='O')
+        ce.evolve(nGens=nGens, nNets=netsPerConnectome, testsPerNet=testsPerNet, saveDir=saveDir, saveName='emnist', numWorkers=numWorkers, saveAllGenerations=True)
+    elif mode == 'demo':
+        print('Loading connectome')
+        connectome = net.Connectome(seedPath);
+        print('Creating net')
+        n = connectome.createNet()
+        print('Choosing interactor')
+        idx = np.random.choice(trainingImageIndices, size=1)[0]
+        print('Chose #', idx)
+        ia = interactors[idx]
+        print('Running interactor...')
+        output = n.runInteraction(ia,
+            inputAttributeName='region',
+            inputAttributeValue='I',
+            inputMapped=True,
+            outputAttributeName='region',
+            outputAttributeValue='O',
+            outputMapped=True)
+        print('...done running interactor')
+        print('Target:     ', ia.getTargets())
+        print('Firing rate:', ia.getFiringRate())
+        score = ia.scoreOutput()
+        print('Score:      ', score)
+        showImage(idx, images, labels)
+
 
 
     # images[k, :]

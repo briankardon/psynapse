@@ -1,4 +1,12 @@
 import numpy as np
+try:
+    # Attempt to import cupy, the GPU-accelerated replacement for numpy
+    import cupy as cp
+    GPU = True
+except:
+    # cupy import failed, fall back to using numpy directly
+    import numpy as cp
+    GPU = False
 from sklearn.decomposition import PCA
 from matplotlib import pyplot as plt
 import matplotlib.patches as patches
@@ -54,36 +62,36 @@ class Net:
         if historyLength < 2:
             raise ValueError('historyLength must be at least 2, to allow for Hebbian learning.')
         self.numNeurons = numNeurons
-        self.connections = np.zeros([self.numNeurons, self.numNeurons])   # Direct excitatory/inhibitory connection matrix
+        self.connections = cp.zeros([self.numNeurons, self.numNeurons])   # Direct excitatory/inhibitory connection matrix
         self.baseConnections = self.connections.copy()
-        self.modConnections = np.zeros([self.numNeurons, self.numNeurons])  # Modulatory connection matrix
+        self.modConnections = cp.zeros([self.numNeurons, self.numNeurons])  # Modulatory connection matrix
         self.baseModConnections = self.modConnections.copy()
         self.neurons = [Neuron(self, k) for k in range(self.numNeurons)]
-        self.activations = np.zeros(self.numNeurons)
-        self.history = np.zeros([self.numNeurons, historyLength])
+        self.activations = cp.zeros(self.numNeurons)
+        self.history = cp.zeros([self.numNeurons, historyLength])
         # print('Initializing net with history size =', self.history.shape)
         self.hebbianPlasticityRate = hebbianPlasticityRate
         self.homeostaticPlasticityFactor = homeostaticPlasticityFactor
         if thresholds is None:
-            self.baseThresholds = np.random.normal(loc=thresholdMean, scale=thresholdSigma, size=self.numNeurons)
+            self.baseThresholds = cp.random.normal(loc=thresholdMean, scale=thresholdSigma, size=self.numNeurons)
         else:
             try:
                 # If it's a numpy array, copy it to ensure separate memory space
                 self.baseThresholds = thresholds.copy()
             except AttributeError:
                 # Maybe it's just a list?
-                self.baseThresholds = np.array(thresholds)
+                self.baseThresholds = cp.array(thresholds)
         self.thresholds = self.baseThresholds.copy()
         if refractoryPeriods is None:
-            self.refractoryPeriods = np.round(np.random.normal(loc=refractoryPeriodMean, scale=refractoryPeriodSigma, size=self.numNeurons))
+            self.refractoryPeriods = cp.round(np.random.normal(loc=refractoryPeriodMean, scale=refractoryPeriodSigma, size=self.numNeurons))
         else:
             try:
                 # If it's a numpy array, copy it to ensure separate memory space
                 self.refractoryPeriods = refractoryPeriods.copy()
             except AttributeError:
                 # Maybe it's just a list?
-                self.refractoryPeriods = np.array(refractoryPeriods)
-        self.refractoryCountdowns = np.zeros(self.numNeurons)
+                self.refractoryPeriods = cp.array(refractoryPeriods)
+        self.refractoryCountdowns = cp.zeros(self.numNeurons)
         self.connectionArrows = [[None for k in range(self.numNeurons)] for j in range(self.numNeurons)]
         self.neuronMarkers = [None for k in range(self.numNeurons)]
         # Neurons can be given custom attributes. Each attribute has an entry
@@ -111,7 +119,7 @@ class Net:
     def setHistoryLength(self, newLength):
         oldLength = self.getHistoryLength()
         if newLength > oldLength:
-            self.history = np.append(self.history, np.zeros([self.numNeurons, newLength-oldLength]))
+            self.history = np.append(self.history, np.zeros([self.numNeurons, newLength-oldLength]), axis=1)
         elif oldLength > newLength:
             self.history = self.history[:, :newLength]
 
@@ -280,11 +288,10 @@ class Net:
 
     def activate(self):
         '''Simulate activation of neurons and transmission of action potentials'''
-
-        self.history = np.roll(self.history, 1, axis=1)
+        self.history = cp.roll(self.history, 1, axis=1)
         # Determine which neurons will fire
         firing = (self.refractoryCountdowns <= 0) & (self.activations > self.thresholds)
-        notFiring =  np.logical_not(firing)
+        notFiring =  cp.logical_not(firing)
         # Add firing to history
         self.history[:, 0] = firing
         # Pass signal from firing neurons downstream
@@ -294,12 +301,15 @@ class Net:
         # Pass modulatory signals. Add the modulatory signal to the downstream
         #   neuron's threshold, then move all threshold towards each neuron's
         #   base threshold.
-        self.thresholds += firing.dot(self.modConnections) + 0.25*(self.baseThresholds - self.thresholds)
+        self.thresholds += firing.dot(self.modConnections) + self.homeostaticPlasticityFactor * (self.baseThresholds - self.thresholds)
         if self.hebbianPlasticityRate != 0:
             # Create matrix of firing coincidences (where C[a, b] = 1 if b fired,
             #   and a fired on the last step), then multiply by the hebbian
             #   plasticity factor, to determine learning changes in network
-            hebbianPlasticity = np.logical_and.outer(firing, self.history[:, 1]) * (self.connections != 0) * self.hebbianPlasticityRate
+            if GPU:
+                hebbianPlasticity = cp.logical_and(firing[:, None], self.history[:, 1]) * (self.connections != 0) * self.hebbianPlasticityRate
+            else:
+                hebbianPlasticity = np.logical_and.outer(firing, self.history[:, 1]) * (self.connections != 0) * self.hebbianPlasticityRate
         else:
             hebbianPlasticity = 0
         if self.homeostaticPlasticityFactor != 0:
@@ -367,7 +377,10 @@ class Net:
           '''
 
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
-        return self.history[indices, timeLag]
+        if GPU:
+            return self.history[indices, timeLag].get()
+        else:
+            return self.history[indices, timeLag]
 
     def getOutputSequence(self, times, indices=None, attributeName=None, attributeValue=None):
         '''Get activations of neurons indicated by indices at given timepoints
@@ -474,7 +487,10 @@ class Net:
 
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
 
-        self.activations[indices] += inputs
+        if GPU:
+            self.activations[indices] += cp.array(inputs)
+        else:
+            self.activations[indices] += inputs
 
     def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None,
             attributeName=None, attributeNameA=None, attributeValueA=None,
@@ -883,7 +899,7 @@ class Net:
     def runInteraction(self, interactor, inputIndices=None,
         inputAttributeName=None, inputAttributeValue=None, inputMapped=False,
         outputIndices=None, outputAttributeName=None, outputAttributeValue=None,
-        outputMapped=False):
+        outputMapped=False, verbose=False):
         '''Run neural network with a pattern stimulation, and return the outputs
 
         This differs from runSequence - instead of a predefined array of inputs
@@ -922,11 +938,14 @@ class Net:
 
         t = 0
         while True:
+            if verbose: print('runInteraction: t=', t);
             try:
                 # print('got outputs:', self.getOutput(indices=outputIndices))
                 newInput = interactor.next(lastOutputs=self.getOutput(indices=outputIndices))
+                if verbose: print('runInteraction: Next input=', newInput);
             except StopIteration:
                 # Done stimulating
+                if verbose: print('runInteraction: Done stimulating')
                 break;
             # print('Interaction #{t}'.format(t=t+1))
             self.addInput(newInput, indices=inputIndices)
@@ -938,6 +957,7 @@ class Net:
                 # Going to lose output if we don't expand history
                 self.setHistoryLength(t)
 
+        if verbose: print('runInteraction: Output=', self.getOutputSequence(np.s_[:t], indices=outputIndices))
         return self.getOutputSequence(np.s_[:t], indices=outputIndices)
 
     def runSequence(self, inputs, inputIndices=None, inputAttributeName=None, inputAttributeValue=None, outputIndices=None, outputAttributeName=None, outputAttributeValue=None):
@@ -1252,12 +1272,13 @@ class Connectome:
             #   new region, or prune a projection)
             allowableRegions = [r for r in self.regionNames if r not in noProjectRegions and r not in immutableRegions]
             numConnectedRegions = len(pop.connectedRegions)
+            numRemovableConnectedRegions = len([r for r in pop.connectedRegions if r not in immutableRegions])
             # Determine whether to add or remove a connected region
             if numConnectedRegions == len(allowableRegions):
                 # Max # of connected regions. Remove one
                 regionDelta = -1
-            elif numConnectedRegions == 0:
-                # Min # of connected regions. Add one
+            elif numRemovableConnectedRegions == 0:
+                # Min # of removable connected regions. Add one
                 regionDelta = 1
             else:
                 # Calculate probability of add vs remove

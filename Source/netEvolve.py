@@ -2,6 +2,7 @@ import numpy as np
 import net
 from pathlib import Path
 import multiprocessing as mp
+import time
 
 class BaseInteractor:
     def __init__(self, targets=None, normalizeTargets=False, averagingTime=1):
@@ -92,6 +93,13 @@ class BaseInteractor:
     def getHistory(self):
         return self.__history
 
+    def getFiringRate(self):
+        if self.__history is None:
+            raise ValueError('Cannot calculate score because no outputs have been provided yet.')
+        # Average outputs over time
+        firingRate = np.nanmean(self.__history, axis=1)
+        return firingRate
+
     def scoreOutput(self):
         '''Return a score representing how far the current average output vector
             is to the target vector, by Euclidean distance.
@@ -101,20 +109,26 @@ class BaseInteractor:
                 precisely the average output matches the target vector.'''
         if self.__targets is None:
             raise ValueError('Cannot calculate score because target array has not been provided.')
-        if self.__history is None:
-            raise ValueError('Cannot calculate score because no outputs have been provided yet.')
-        # Average outputs over time
-        firingRate = np.nanmean(self.__history, axis=1)
+        firingRate = self.getFiringRate()
         # Normalize firing rate
-        mag = firingRate.sum()
+        mag = np.linalg.norm(firingRate)
         if mag != 0:
-            firingRate = firingRate / firingRate.sum()
+            firingRate = firingRate / mag
         # Calculate output score
         # print('history=   ', self.__history)
         # print('type history=   ', type(self.__history))
         # print('firingRate=', firingRate)
         # print('__targets= ', self.__targets)
+
         score = np.linalg.norm(firingRate - self.__targets)
+        # print('Firing rate:')
+        # for f in firingRate:
+        #     print('{f:.2f}'.format(f=f), end=', ')
+        # print()
+        # for t in self.__targets:
+        #     print('{t:.2f}'.format(t=t), end=', ')
+        # print()
+        # print('Score:', score)
         return score
 
     def restart(self):
@@ -609,28 +623,36 @@ class ConnectomeEvolver:
         '''
 
         self.population = self.seeds
+        genTimes = []
         for g in range(nGens):
+            genStart = time.time()
             print('Running generation #{g} of {gn}'.format(g=g, gn=nGens))
             self.population = self.fillPopulation(self.population, self.populationSize, keepSeeds=True, meanNumMutations=2, stdNumMutations=0.5)
             scores = []
             if numWorkers is None:
+                # Do not use multiple processes to score connectomes in parallel
                 for k, co in enumerate(self.population):
                     print('    Testing connectome #{k} of {kn}'.format(k=k+1, kn=len(self.population)))
                     scores.append(self.scoreConnectome(co, nNets=nNets, testsPerNet=testsPerNet))
             else:
+                # Use multiple processes to score connectomes in parallel
                 with mp.Pool(processes=numWorkers) as pool:
                     results = []
+                    scores = []
                     for k, co in enumerate(self.population):
-                        print('    Testing connectome #{k} of {kn}'.format(k=k+1, kn=len(self.population)))
+                        print('    Testing connectome #{k} of {kn}, gen {g} of {gn}'.format(k=k+1, kn=len(self.population), g=g+1, gn=nGens))
                         result = pool.apply_async(self.scoreConnectome, (co,), dict(nNets=nNets, testsPerNet=testsPerNet))
                         results.append(result)
                     print('    Waiting for results...')
-                    scores = [result.get() for result in results]
+                    for k, result in enumerate(results):
+                        scores.append(result.get())
+                        print('Got scores for connectome #{k} of {kn}, gen {g} of {gn}'.format(k=k+1, kn=len(self.population), g=g+1, gn=nGens))
             # Sort population and scores
             sortedPopulation, sortedScores = zip(*sorted(zip(self.population, scores), key=lambda p:p[1]))
             numToKeep = round(self.keepFrac * len(self.population))
             survivors = sortedPopulation[0:numToKeep]
             survivorScores = sortedScores[0:numToKeep]
+            # breakpoint()
             if saveAllGenerations or g == nGens-1:
                 print('Saving {n} survivors.'.format(n=numToKeep))
                 for k in range(numToKeep):
@@ -640,6 +662,15 @@ class ConnectomeEvolver:
             self.population = survivors
             print('Survivor scores:')
             print(survivorScores)
+            genEnd = time.time()
+            genTimes.append(genEnd - genStart)
+            meanGenTime = np.mean(genTimes)
+            print('Mean generation time:     {t:.01f} s'.format(t=meanGenTime))
+            timeElapsed = np.sum(genTimes)
+            print('Time elapsed:             {t:.01f} s'.format(t=timeElapsed))
+            estimatedTimeRemaining = meanGenTime * (nGens - (g + 1))
+            print('Estimated time remaining: {t:.01f} s'.format(t=estimatedTimeRemaining))
+
 
 if __name__ == "__main__":
     stim1 = np.array([[1, 2, 3, 4], [11, 22, 33, 44], [111, 222, 333, 444]]);
