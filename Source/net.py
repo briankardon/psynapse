@@ -3,10 +3,14 @@ try:
     # Attempt to import cupy, the GPU-accelerated replacement for numpy
     import cupy as cp
     GPU = True
+    # For drop-in convenience
+    cp2np = lambda x:cp.asnumpy(x)
 except:
     # cupy import failed, fall back to using numpy directly
     import numpy as cp
     GPU = False
+    # For drop-in convenience
+    cp2np = lambda x:x
 from sklearn.decomposition import PCA
 from matplotlib import pyplot as plt
 import matplotlib.patches as patches
@@ -1065,7 +1069,7 @@ class Connectome:
                     continue
                 if k == 1:
                     # Notes row
-                    self.notes = row[0];
+                    self.notes = row[0]
                     continue
                 self.populations.append(ProjectingPopulation(*row))
         # Get a unique list of region names
@@ -1195,6 +1199,19 @@ class Connectome:
 
         with open(file, 'w', newline='') as f:
             self.streamToFile(f)
+
+    def summarize(self):
+        self.populations
+        return dict(
+            numPopulations = len(self.populations),
+            numNeurons = sum([pop.meanNumMutations for pop in self.populations]),
+            meanConnectionStrength = cp.mean([pop.meanConnectionStrength for pop in self.populations]),
+            numProjections = sum([len(pop.connectedRegions) for pop in self.populations]),
+            fractionModulatory = sum([pop.meanNumMutations for pop in self.populations if pop.modulatory])/sum([pop.meanNumMutations for pop in self.populations]),
+            refractoryPeriod = cp.mean([pop.meanRefractoryPeriod for pop in self.populations]),
+            threshold = cp.mean([pop.meanThreshold for pop in self.populations]),
+            numConnections = sum([pop.meanNumConnections for pop in self.populations]),
+        )
 
     def mutate(self, noProjectRegions=[], immutableRegions=[], verbose=False):
         '''Randomly make changes in the population parameters
@@ -1358,7 +1375,19 @@ def boolParser(value):
 
 class ProjectingPopulation:
     '''A class representing one projecting population within a connectome spec'''
-    def __init__(self, regionA, regionsB, populationName, proportions, numNeurons, modulatory, thresholds, refractoryPeriods, numConnections, connectionStrength, tags, notes):
+    def __init__(self,
+                    regionA,
+                    regionsB,
+                    populationName,
+                    proportions,
+                    numNeurons,
+                    modulatory,
+                    thresholds,
+                    refractoryPeriods,
+                    numConnections,
+                    connectionStrength,
+                    tags,
+                    notes):
         '''Constructor for ProjectingPopulation class
 
         This is meant to be directly passed the raw string elements in a single
@@ -1566,7 +1595,7 @@ if __name__ == "__main__":
 
     2. Use a connectome file:
 
-        python net.py connectomeFileName.csv
+        python net.py connectome connectomeFileName.csv
 
     3. Create example chain topology:
 
@@ -1576,7 +1605,7 @@ if __name__ == "__main__":
 
     np.set_printoptions(linewidth=100000, formatter=dict(float=lambda x: "% 0.1f" % x))
 
-    initType = sys.argv[1]   #'connectome'
+    initType = sys.argv[1]
 
     # Create blank stimulation matrix (neuron x time)
     nInputs = 50
@@ -1592,7 +1621,7 @@ if __name__ == "__main__":
         n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7, historyLength=T) #, hebbianPlasticityRate=0)
         regularIndices = np.arange(0, 1000)
         # modulatoryIndices = np.arange(800, N)
-        n.createLayers(nLayers=NL,  nIntraconnects=N, nInterconnects=N//10, mu=0.7, sigma=2, indices=regularIndices)
+        n.createLayers(nLayers=NL, nIntraconnects=N, nInterconnects=N//10, mu=0.7, sigma=2, indices=regularIndices)
         stim[0:10, 0] = 10
         majorGrouping = 'layer'
     elif initType == "connectome":
@@ -1622,8 +1651,12 @@ if __name__ == "__main__":
 
     output = n.runSequence(stim, inputIndices=inIdx, outputIndices=outIdx)
 
+    # Ensure these arrays are numpy, to avoid compatibility errors
+    history = cp2np(n.history)
+    connections = cp2np(n.connections)
+
     f, axs = plt.subplots(2, 2, sharex='col', sharey='row', gridspec_kw={'height_ratios': [3, 1]})
-    axs[0, 0].imshow(np.flip(n.history, axis=1), cmap='binary', interpolation='none') #, 'XData', np.arange(n.historyLength))
+    axs[0, 0].imshow(np.flip(history, axis=1), cmap='binary', interpolation='none') #, 'XData', np.arange(n.historyLength))
     axs[0, 0].set_aspect('auto')
     # for k in range(n.numNeurons):
     #     plt.step(np.arange(n.historyLength), 5*n.history[k, :] + 10*k)
@@ -1631,12 +1664,13 @@ if __name__ == "__main__":
     #     for j in range(n.numNeurons):
     #         print('{c:0.01f} '.format(c=n.connections[k][j]), end='')
     #     print()
+
     axs[0, 0].set_ylabel('Neuron #')
     axs[0, 0].set_xlabel('Simulated time')
     axs[0, 0].title.set_text('Raster')
-    connIm = axs[0, 1].imshow(n.connections, cmap='seismic', interpolation='none')
+    connIm = axs[0, 1].imshow(connections, cmap='seismic', interpolation='none')
     axs[0, 1].set_aspect('auto')
-    cRadius = max(np.max(n.connections), abs(np.min(n.connections)))
+    cRadius = max(np.max(connections), abs(np.min(connections)))
     connIm.set_clim(-cRadius, cRadius)
     axs[0, 1].set_ylabel("Upstream neuron #")
     axs[0, 1].set_xlabel("Downstream neuron #")
@@ -1650,12 +1684,12 @@ if __name__ == "__main__":
             groupIdx = n.filterByAttribute(majorGrouping, groupNum)
             if len(groupIdx) == 0:
                 continue
-            trace = 10*np.mean(np.flip(n.history[groupIdx, :], axis=1), axis=0) + (max(groupNums) - groupNum)*2
+            trace = 10*np.mean(np.flip(history[groupIdx, :], axis=1), axis=0) + (max(groupNums) - groupNum)*2
             groupMaxFiringRate = trace.max()
             if groupMaxFiringRate > maxFiringRate:
                 maxFiringRate = groupMaxFiringRate
 
-            axs[1, 0].plot(10*np.mean(np.flip(n.history[groupIdx, :], axis=1), axis=0) + (max(groupNums) - groupNum)*2)
+            axs[1, 0].plot(10*np.mean(np.flip(history[groupIdx, :], axis=1), axis=0) + (max(groupNums) - groupNum)*2)
         axs[1, 0].title.set_text('Region-summed firing rate')
         axs[1, 0].set_ylim(0, maxFiringRate)
 
