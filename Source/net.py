@@ -1,23 +1,32 @@
 import numpy as np
 import warnings
-try:
-    # Attempt to import cupy, the GPU-accelerated replacement for numpy
-    import cupy as cp
-    GPU = True
-    # For drop-in convenience
-    cp2np = lambda x:cp.asnumpy(x)
-except (ImportError, ModuleNotFoundError):
-    # cupy import failed, fall back to using numpy directly
-    warnings.warn("cupy not available, falling back to numpy (no GPU acceleration)", stacklevel=2)
+import sys
+
+if '--cpu' in sys.argv:
+    # User requested CPU-only mode, remove flag so it doesn't interfere
+    # with downstream argument parsing
+    sys.argv.remove('--cpu')
     import numpy as cp
     GPU = False
-    # For drop-in convenience
     cp2np = lambda x:x
+else:
+    try:
+        # Attempt to import cupy, the GPU-accelerated replacement for numpy
+        import cupy as cp
+        GPU = True
+        # For drop-in convenience
+        cp2np = lambda x:cp.asnumpy(x)
+    except (ImportError, ModuleNotFoundError):
+        # cupy import failed, fall back to using numpy directly
+        warnings.warn("cupy not available, falling back to numpy (no GPU acceleration)", stacklevel=2)
+        import numpy as cp
+        GPU = False
+        # For drop-in convenience
+        cp2np = lambda x:x
 from sklearn.decomposition import PCA
 from matplotlib import pyplot as plt
 import matplotlib.patches as patches
 import csv
-import sys
 import re
 import io
 
