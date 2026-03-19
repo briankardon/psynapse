@@ -1,0 +1,11 @@
+numpy
+scipy
+matplotlib
+Pillow
+scikit-learn
+cupy-cuda12x
+waitress
+wsgi-basic-auth
+requests
+WebOb
+pywin32
