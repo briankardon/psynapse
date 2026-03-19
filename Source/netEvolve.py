@@ -649,6 +649,7 @@ class ConnectomeEvolver:
                         print('Got scores for connectome #{k} of {kn}, gen {g} of {gn}'.format(k=k+1, kn=len(self.population), g=g+1, gn=nGens))
             # Sort population and scores
             sortedPopulation, sortedScores = zip(*sorted(zip(self.population, scores), key=lambda p:p[1]))
+            print('Sorted scores:', sortedScores)
             numToKeep = round(self.keepFrac * len(self.population))
             survivors = sortedPopulation[0:numToKeep]
             survivorScores = sortedScores[0:numToKeep]
