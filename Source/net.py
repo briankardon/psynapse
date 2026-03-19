@@ -348,7 +348,7 @@ class Net:
         self.history = cp.roll(self.history, 1, axis=1)
         # Determine which neurons will fire
         firing = (self.refractoryCountdowns <= 0) & (self.activations > self.thresholds)
-        notFiring =  cp.logical_not(firing)
+        notFiring = cp.logical_not(firing)
         # Add firing to history
         self.history[:, 0] = firing
         # Pass signal from firing neurons downstream
@@ -980,7 +980,6 @@ class Net:
         markerSize = 10
         markerRadius = np.sqrt(markerSize)/20
         ax = plt.axes()
-#        ax.set_aspect(1)
         ax.scatter(x, y, s=markerSize)
         ars = patches.ArrowStyle.Simple(tail_width=0.5, head_width=4, head_length=8)
         cs = patches.ConnectionStyle.Arc3(rad=4)
@@ -1000,7 +999,6 @@ class Net:
                 if k == j:
                     # Autapse
                     distFromZero = np.linalg.norm(p1)
-#                    print('Autapse points:', p1, p2)
                     if distFromZero == 0:
                         dirHat = np.array([0, 1])
                     else:
@@ -1018,14 +1016,9 @@ class Net:
                             connectionstyle=cs
                         )
                     )
-#                    self.connectionArrows[k][j] = plt.arrow(
-#                        p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1],
-#                        color=color, alpha=brightness,
-#                        head_width=0.1)
                 else:
                     # Synapse
                     dir = p2 - p1
-#                    print('Synapse points:', p1, p2)
                     distBetweenPoints = np.linalg.norm(dir)
                     if distBetweenPoints == 0:
                         dirHat = np.array([0, 1])
@@ -1044,10 +1037,6 @@ class Net:
                             alpha=brightness
                         )
                     )
-#                    self.connectionArrows[k][j] = plt.arrow(
-#                        p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1],
-#                        color=color, alpha=brightness,
-#                        head_width=0.1)
                 ax.add_patch(self.connectionArrows[k][j])
         plt.show()
 
@@ -1061,8 +1050,6 @@ class Net:
 
         if visualize:
             pass
-            # plt.ion()
-            # plt.show()
         for k in range(iters):
             print('k:', k)
             self.activate()
@@ -1111,24 +1098,26 @@ class Net:
 
         t = 0
         while True:
-            if verbose: print('runInteraction: t=', t);
+            if verbose:
+                print('runInteraction: t=', t)
             try:
-                # print('got outputs:', self.getOutput(indices=outputIndices))
                 newInput = interactor.next(
                     lastOutputs=self.getOutput(
                         indices=outputIndices
                     )
                 )
-                if verbose: print('runInteraction: Next input=', newInput);
+                if verbose:
+                    print(
+                        'runInteraction: Next input=',
+                        newInput
+                    )
             except StopIteration:
                 # Done stimulating
-                if verbose: print('runInteraction: Done stimulating')
-                break;
-            # print('Interaction #{t}'.format(t=t+1))
+                if verbose:
+                    print('runInteraction: Done stimulating')
+                break
             self.addInput(newInput, indices=inputIndices)
-            # print('history before: ', self.history[0:5, :])
             self.activate()
-            # print('history after: ', self.history[0:5, :])
             t = t + 1
             if self.getHistoryLength() < t:
                 # Going to lose output if we don't expand history
@@ -1254,7 +1243,7 @@ class Connectome:
                 parameters in CSV format.
         """
         self.populations = []
-        self.notes = None;
+        self.notes = None
         # Open the connectome definition file
         if connectomeFile is not None:
             # User provided a file path
@@ -1323,8 +1312,6 @@ class Connectome:
             regionID = self.regionNameReverseMap[self.populations[k].regionName]
             regionIDs.extend([regionID for j in range(numNeurons[k])])
 
-        # print('Total neurons = ', totalNumNeurons)
-
         n = Net(
             numNeurons=totalNumNeurons,
             refractoryPeriodMean=4,
@@ -1385,11 +1372,6 @@ class Connectome:
             # Loop over each downstream region and add connections
             for j in range(len(connectedRegionIDs)):
                 regionalConnectionCount = sum(connections == connectedRegionIDs[j])
-                # print('making {n} connections from {a} to'
-                #       ' {b}'.format(
-                #     n=regionalConnectionCount, a=k,
-                #     b=self.regionNameMap[
-                #         connectedRegionIDs[j]]))
                 n.randomizeConnections(regionalConnectionCount,
                     self.populations[k].meanConnectionStrength,
                     self.populations[k].stdConnectionStrength,
@@ -1936,9 +1918,8 @@ if __name__ == "__main__":
             N, refractoryPeriodMean=10,
             refractoryPeriodSigma=7,
             historyLength=T
-        )  #, hebbianPlasticityRate=0)
+        )
         regularIndices = np.arange(0, 1000)
-        # modulatoryIndices = np.arange(800, N)
         n.createLayers(
             nLayers=NL, nIntraconnects=N,
             nInterconnects=N//10, mu=0.7, sigma=2,
@@ -1984,15 +1965,8 @@ if __name__ == "__main__":
     axs[0, 0].imshow(
         np.flip(history, axis=1),
         cmap='binary', interpolation='none'
-    )  #, 'XData', np.arange(n.historyLength))
+    )
     axs[0, 0].set_aspect('auto')
-    # for k in range(n.numNeurons):
-    #     plt.step(np.arange(n.historyLength), 5*n.history[k, :] + 10*k)
-    # for k in range(n.numNeurons):
-    #     for j in range(n.numNeurons):
-    #         print('{c:0.01f} '.format(c=n.connections[k][j]), end='')
-    #     print()
-
     axs[0, 0].set_ylabel('Neuron #')
     axs[0, 0].set_xlabel('Simulated time')
     axs[0, 0].title.set_text('Raster')
