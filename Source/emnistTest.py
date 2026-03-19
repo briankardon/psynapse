@@ -62,6 +62,12 @@ if __name__ == '__main__':
         netsPerConnectome=10
         testsPerNet=5
         numWorkers=8
+
+
+    useMonitor = '--monitor' in sys.argv
+    if useMonitor:
+        sys.argv.remove('--monitor')
+
     saveDir = r'.\EvolveSessions\emnist_learner'
     if len(sys.argv) < 2:
         seedPath = 'letterRecognitionSeedConnectome.csv'
@@ -85,10 +91,7 @@ if __name__ == '__main__':
         # plt.imshow(np.transpose(images[k, :].reshape([28, 28])))
         # plt.gca().title.set_text(str(labels[k]))
         # plt.show()
-
-    useMonitor = '--monitor' in sys.argv
     if useMonitor:
-        sys.argv.remove('--monitor')
         from evolutionMonitor import EvolutionState, launch
         state = EvolutionState()
     else:
