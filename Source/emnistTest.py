@@ -19,7 +19,7 @@ def showImage(k, images, labels):
 #   http://arxiv.org/abs/1702.05373
 
 if __name__ == '__main__':
-    dataset = scipy.io.loadmat('..\Resources\emnist-letters.mat')['dataset']
+    dataset = scipy.io.loadmat(r'..\Resources\emnist-letters.mat')['dataset']
 
     images = dataset['train'][0, 0]['images'][0, 0]
     labels = dataset['train'][0, 0]['labels'][0, 0][:, 0]

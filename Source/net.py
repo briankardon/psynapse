@@ -159,7 +159,7 @@ class Net:
         else:
             reverseMap = dict([(attributeMap[v], v) for v in attributeMap])
             if len(reverseMap) < len(attributeMap):
-                warning('Provided attributeMap is not a 1:1 reversible mapping. This may result in unexpected behavior.')
+                warnings.warn('Provided attributeMap is not a 1:1 reversible mapping. This may result in unexpected behavior.')
         self.attributeMapsReversed.append(reverseMap)
         self.attributeValues = np.pad(self.attributeValues, ([0, 1], [0, 0]))
         if initialValues is not None:
@@ -288,7 +288,7 @@ class Net:
             indices = np.s_[:]
         if mapped:
             # Value supplied is a mapped value. Reverse-map value, then set it.
-            values = [self.attributeMapsReversed[value] for value in values]
+            values = [self.attributeMapsReversed[idx][value] for value in values]
 
         self.attributeValues[idx, indices] = values
 
@@ -1206,7 +1206,6 @@ class Connectome:
             self.streamToFile(f)
 
     def summarize(self):
-        self.populations
         return dict(
             numPopulations = len(self.populations),
             numNeurons = sum([pop.meanNumNeurons for pop in self.populations]),
@@ -1218,7 +1217,7 @@ class Connectome:
             numConnections = sum([pop.meanNumConnections for pop in self.populations]),
         )
 
-    def mutate(self, noProjectRegions=[], immutableRegions=[], verbose=False):
+    def mutate(self, noProjectRegions=None, immutableRegions=None, verbose=False):
         '''Randomly make changes in the population parameters
 
         Arguments:
@@ -1228,6 +1227,10 @@ class Connectome:
                 immutable - populations belonging to these regions may not be
                 mutated, added, or removed
         '''
+        if noProjectRegions is None:
+            noProjectRegions = []
+        if immutableRegions is None:
+            immutableRegions = []
 
         # Choose a population index to mutate
         mutablePopulations = [idx for idx in range(len(self.populations)) if self.populations[idx].regionName not in immutableRegions]

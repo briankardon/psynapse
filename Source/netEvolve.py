@@ -84,7 +84,7 @@ class BaseInteractor:
         deltaTargetSize = len(newTargets) - len(self.__targets)
         if deltaTargetSize > 0:
             # Need to change increase history size
-            self.__history = np.concatenate(self.__history, np.full([deltaTargetSize, self.__averagingTime], np.nan))
+            self.__history = np.concatenate([self.__history, np.full([deltaTargetSize, self.__averagingTime], np.nan)])
         elif deltaTargetSize < 0:
             self.__history = self.__history[:deltaTargetSize, :]
 
@@ -292,7 +292,7 @@ class ChainInteractor(BaseInteractor):
         for idx, interactor in enumerate(self.interactors):
             if interactorIdx is None or idx in interactorIdx:
                 # This is a selected interactor.
-                if soFar and interactor.history is None:
+                if soFar and interactor.getHistory() is None:
                     # Only interactors that have run so far are requested, and
                     #   this one hasn't run, so skip scoring it.
                     continue
@@ -353,7 +353,7 @@ class StackInteractor(BaseInteractor):
             raise StopIteration('Stacked interactor stimulation has completed.')
 
     def __mul__(self, other):
-        if type(other) == StackInteractor:
+        if isinstance(other, StackInteractor):
             # Stack the two together
             return StackInteractor(self.interactors + other.interactors)
         else:
@@ -551,7 +551,6 @@ class ConnectomeEvolver:
             #   chained one after another.
             print('        Creating net #{n} of {nn}'.format(n=k+1, nn=nNets))
             interactor = sum(np.random.choice(self.interactors, size=testsPerNet))
-            subScores = []
             n = connectome.createNet()
             output = n.runInteraction(interactor,
                 inputAttributeName='region',
