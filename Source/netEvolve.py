@@ -436,7 +436,7 @@ class ConnectomeEvolver:
     def __init__(self, seedConnectomes, interactors,
             populationSize=100, keepFrac=0.2, inputRegion="I", outputRegion="O",
             keepSeeds=False, meanNumMutations=2,
-            stdNumMutations=0.5):
+            stdNumMutations=0.5, state=None):
         '''Instantiate a ConnectomeEvolver
 
 
@@ -488,6 +488,7 @@ class ConnectomeEvolver:
         self.keepSeeds = keepSeeds
         self.meanNumMutations = meanNumMutations
         self.stdNumMutations = stdNumMutations
+        self.state = state
 
     def fillPopulation(self, seedConnectomes, N, keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
         '''Take a seed populations, and randomly propagate them.
@@ -623,15 +624,31 @@ class ConnectomeEvolver:
 
         self.population = self.seeds
         genTimes = []
+
+        if self.state is not None:
+            with self.state.lock:
+                self.state.total_generations = nGens
+
         for g in range(nGens):
             genStart = time.time()
             print('Running generation #{g} of {gn}'.format(g=g, gn=nGens))
-            self.population = self.fillPopulation(self.population, self.populationSize, keepSeeds=True, meanNumMutations=2, stdNumMutations=0.5)
+            self.population = self.fillPopulation(self.population, self.populationSize,
+                keepSeeds=True, meanNumMutations=self.meanNumMutations, stdNumMutations=self.stdNumMutations)
+
+            if self.state is not None:
+                with self.state.lock:
+                    self.state.generation = g
+                    self.state.current_connectome = 0
+                    self.state.total_connectomes = len(self.population)
+
             scores = []
             if numWorkers is None:
                 # Do not use multiple processes to score connectomes in parallel
                 for k, co in enumerate(self.population):
                     print('    Testing connectome #{k} of {kn}'.format(k=k+1, kn=len(self.population)))
+                    if self.state is not None:
+                        with self.state.lock:
+                            self.state.current_connectome = k + 1
                     scores.append(self.scoreConnectome(co, nNets=nNets, testsPerNet=testsPerNet))
             else:
                 # Use multiple processes to score connectomes in parallel
@@ -640,6 +657,9 @@ class ConnectomeEvolver:
                     scores = []
                     for k, co in enumerate(self.population):
                         print('    Testing connectome #{k} of {kn}, gen {g} of {gn}'.format(k=k+1, kn=len(self.population), g=g+1, gn=nGens))
+                        if self.state is not None:
+                            with self.state.lock:
+                                self.state.current_connectome = k + 1
                         result = pool.apply_async(self.scoreConnectome, (co,), dict(nNets=nNets, testsPerNet=testsPerNet))
                         results.append(result)
                     print('    Waiting for results...')
@@ -652,7 +672,6 @@ class ConnectomeEvolver:
             numToKeep = round(self.keepFrac * len(self.population))
             survivors = sortedPopulation[0:numToKeep]
             survivorScores = sortedScores[0:numToKeep]
-            # breakpoint()
             if saveAllGenerations or g == nGens-1:
                 print('Saving {n} survivors.'.format(n=numToKeep))
                 for k in range(numToKeep):
@@ -670,6 +689,16 @@ class ConnectomeEvolver:
             print('Time elapsed:             {t:.01f} s'.format(t=timeElapsed))
             estimatedTimeRemaining = meanGenTime * (nGens - (g + 1))
             print('Estimated time remaining: {t:.01f} s'.format(t=estimatedTimeRemaining))
+
+            if self.state is not None:
+                with self.state.lock:
+                    self.state.gen_scores.append(list(sortedScores))
+                    self.state.survivor_scores.append(list(survivorScores))
+                    self.state.best_scores.append(sortedScores[0])
+                    self.state.mean_scores.append(float(np.mean(scores)))
+                    self.state.gen_times.append(genTimes[-1])
+                    self.state.elapsed = timeElapsed
+                    self.state.estimated_remaining = estimatedTimeRemaining
 
 
 if __name__ == "__main__":

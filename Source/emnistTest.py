@@ -5,6 +5,7 @@ import net
 import netEvolve as ne
 from PIL import Image
 import sys
+import threading
 
 TRANSPOSE = Image.Transpose.TRANSPOSE
 letters = 'abcdefghijklmnopqrstuvwxyz'
@@ -61,7 +62,7 @@ if __name__ == '__main__':
         netsPerConnectome=10
         testsPerNet=5
         numWorkers=8
-    saveDir = r'D:\Dropbox\Documents\Work\Cornell Lab Tech\Projects\psynapse\Source\evolveSessions\emnist_learner'
+    saveDir = r'.\EvolveSessions\emnist_learner'
     if len(sys.argv) < 2:
         seedPath = 'letterRecognitionSeedConnectome.csv'
     else:
@@ -85,11 +86,27 @@ if __name__ == '__main__':
         # plt.gca().title.set_text(str(labels[k]))
         # plt.show()
 
+    useMonitor = '--monitor' in sys.argv
+    if useMonitor:
+        sys.argv.remove('--monitor')
+        from evolutionMonitor import EvolutionState, launch
+        state = EvolutionState()
+    else:
+        state = None
+
     if mode == 'evolve':
         seedConnectomes = [net.Connectome(seedPath)]
         print('pops: ', seedConnectomes[0].populations)
-        ce = ne.ConnectomeEvolver(seedConnectomes, interactors, populationSize=populationSize, inputRegion='I', outputRegion='O')
-        ce.evolve(nGens=nGens, nNets=netsPerConnectome, testsPerNet=testsPerNet, saveDir=saveDir, saveName='emnist', numWorkers=numWorkers, saveAllGenerations=True)
+        ce = ne.ConnectomeEvolver(seedConnectomes, interactors, populationSize=populationSize, inputRegion='I', outputRegion='O', state=state)
+        evolve_kwargs = dict(nGens=nGens, nNets=netsPerConnectome, testsPerNet=testsPerNet,
+                             saveDir=saveDir, saveName='emnist', numWorkers=numWorkers, saveAllGenerations=True)
+        if useMonitor:
+            evo_thread = threading.Thread(target=ce.evolve, kwargs=evolve_kwargs, daemon=True)
+            evo_thread.start()
+            print('Starting evolution monitor at http://localhost:8050')
+            launch(state)
+        else:
+            ce.evolve(**evolve_kwargs)
     elif mode == 'demo':
         print('Loading connectome')
         connectome = net.Connectome(seedPath);
