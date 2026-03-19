@@ -6,7 +6,7 @@ import time
 
 class BaseInteractor:
     def __init__(self, targets=None, normalizeTargets=False, averagingTime=1):
-        '''Initialize Interactor object
+        """Initialize Interactor object
 
         This one returns empty stimulation arrays, but serves as an interface
             for other Interactor classes. It has the base capability to
@@ -23,7 +23,7 @@ class BaseInteractor:
                 so this can result in changes in the source array. If this is
                 a problem, just supply a copy of the target array, rather than
                 the original pointer.
-        '''
+        """
         self.__t = -1
         self.__history = None
         self.__averagingTime = averagingTime
@@ -34,11 +34,11 @@ class BaseInteractor:
             self.__targets = targets
 
     def next(self, *args, lastOutputs=None, **kwargs):
-        '''Return the next set of stimuli for the network.
+        """Return the next set of stimuli for the network.
 
         lastOutputs: A numpy array of outputs from the net. If provided, the
             interactor may be able to provide closed loop feedback, as well as
-            calculate a score for the '''
+            calculate a score for the """
 
         if lastOutputs is not None:
             # Update history with new net outputs if given.
@@ -101,12 +101,12 @@ class BaseInteractor:
         return firingRate
 
     def scoreOutput(self):
-        '''Return a score representing how far the current average output vector
+        """Return a score representing how far the current average output vector
             is to the target vector, by Euclidean distance.
 
         Returns:
             a numerical score, where the closer the number to zero, the more
-                precisely the average output matches the target vector.'''
+                precisely the average output matches the target vector."""
         if self.__targets is None:
             raise ValueError('Cannot calculate score because target array has not been provided.')
         firingRate = self.getFiringRate()
@@ -132,16 +132,16 @@ class BaseInteractor:
         return score
 
     def restart(self):
-        '''Reset Interactor back to initial state'''
+        """Reset Interactor back to initial state"""
         self.__history = None
         self.setTime(-1)
 
 class PredefinedInteractor(BaseInteractor):
-    '''An Interactor class that stimulates using a predefined array of inputs,
+    """An Interactor class that stimulates using a predefined array of inputs,
         one per neuron per time point.
-    '''
+    """
     def __init__(self, stimPattern, *args, **kwargs):
-        '''Initialize Interactor object'''
+        """Initialize Interactor object"""
         super().__init__(*args, **kwargs)
         self.stimPattern = stimPattern
 
@@ -153,18 +153,18 @@ class PredefinedInteractor(BaseInteractor):
             raise StopIteration('End of stimulation pattern')
 
 class TonicInteractor(BaseInteractor):
-    '''This Interactor will just stimulate with the given input
+    """This Interactor will just stimulate with the given input
         over and over for the given number of time steps.
-    '''
+    """
 
     def __init__(self, inputs, timeSteps, *args, **kwargs):
-        ''' Initialize TonicInteractor object
+        """ Initialize TonicInteractor object
 
         Arguments:
             inputs = a 1D array of inputs, one per input neuron
             timeSteps = an integer indicating how many timesteps to stimulate
                 for
-        '''
+        """
         super().__init__(*args, **kwargs)
         self.inputs = inputs
         self.timeSteps = timeSteps
@@ -177,27 +177,27 @@ class TonicInteractor(BaseInteractor):
             raise StopIteration('End of stimulation pattern')
 
 class NullInteractor(TonicInteractor):
-    '''This Interactor provides zero stimulation.'''
+    """This Interactor provides zero stimulation."""
 
     def __init__(self, numInputs, numTimeSteps, *args, **kwargs):
         nullArray = np.zeros(numInputs)
         super().__init__(nullArray, numTimeSteps, *args, **kwargs)
 
 class PatternInteractor(BaseInteractor):
-    '''This Interactor will stimulate with the given input array following a
+    """This Interactor will stimulate with the given input array following a
         given temporal pattern, such that the temporal and neuronal stimulation
         is separable.
-    '''
+    """
 
     def __init__(self, inputs, pattern, *args, **kwargs):
-        ''' Initialize PatternInteractor object
+        """ Initialize PatternInteractor object
 
         Arguments:
             inputs = a 1D numpy array of inputs, one per input neuron
             pattern = a 1D iterable of booleans indicating whether to
                 stimulate with the given input pattern, or not stimulate for
                 each time step
-        '''
+        """
         super().__init__(*args, **kwargs)
         self.inputs = inputs
         self.null = 0*self.inputs
@@ -214,20 +214,20 @@ class PatternInteractor(BaseInteractor):
             raise StopIteration('End of stimulation pattern')
 
 class ChainInteractor(BaseInteractor):
-    '''This interactor will chain multiple interactors together.
+    """This interactor will chain multiple interactors together.
 
     This will allow multiple interactions to be applied, each one after the
         last has ended, but using the same interface as a single interactor.
 
     To use this, instantiate multiple other Interactor objects, then pass them
-        to the ChainInteractor constructor.'''
+        to the ChainInteractor constructor."""
 
     def __init__(self, interactors, *args, **kwargs):
-        ''' Initialize ChainInteractor object
+        """ Initialize ChainInteractor object
 
         Arguments:
             interactors = a list of Interactor objects to be chained together
-        '''
+        """
         super().__init__(*args, **kwargs)
         self.interactors = interactors
         self.interactorIdx = 0
@@ -269,7 +269,7 @@ class ChainInteractor(BaseInteractor):
     def getHistory(self):
         return self.interactors[self.interactorIdx].getHistory()
     def scoreOutput(self, interactorIdx=None, soFar=False, average=True):
-        '''Return the scores for one or more of the chained interactors
+        """Return the scores for one or more of the chained interactors
 
         Return a list of output scores, one for each selected interactor, or
           for all of them if interactorIdx is not provied.
@@ -284,7 +284,7 @@ class ChainInteractor(BaseInteractor):
                 Default is False.
             average = a boolean flag indicating that the output scores should be
                 averaged, rather than a list. Default is True
-        '''
+        """
 
         scores = []
 
@@ -311,7 +311,7 @@ class ChainInteractor(BaseInteractor):
         self.interactorIdx = 0
 
 class StackInteractor(BaseInteractor):
-    '''This interactor will stack stimulation patterns of multiple interactors.
+    """This interactor will stack stimulation patterns of multiple interactors.
 
     NOT FULLY IMPLEMENTED YET
 
@@ -324,10 +324,10 @@ class StackInteractor(BaseInteractor):
         the first interactor is complete, even if the other one is not.
 
     To use this, instantiate multiple other Interactor objects, then pass them
-        to the StackInteractor constructor.'''
+        to the StackInteractor constructor."""
 
     def __init__(self, interactors, *args, terminateOnFirst=True, **kwargs):
-        ''' Initialize StackInteractor object
+        """ Initialize StackInteractor object
 
         Arguments:
             interactors = a list of Interactor objects to be stacked
@@ -336,7 +336,7 @@ class StackInteractor(BaseInteractor):
                 stimulation will continue until the last interactor has
                 finished. If true, the stimulation will terminate when any one
                 interactor has finished. Default is True. NOT IMPLEMENTED YET
-        '''
+        """
         super().__init__(*args, **kwargs)
         self.interactors = interactors
 
@@ -373,15 +373,15 @@ class StackInteractor(BaseInteractor):
         raise NotImplementedError("StackInteractor.scoreOutput is not yet implemented")
 
 class FeedbackInteractor(BaseInteractor):
-    '''This Interctor will stimulate using a sub-interactor, but will also
+    """This Interctor will stimulate using a sub-interactor, but will also
         provide feedback to a second set of input neurons proportional to the
         euclidean distance between the net's output and the given target
         pattern.
-    '''
+    """
 
     def __init__(self, subInteractor, numFeedbackNeurons, *args,
                     feedbackTimeSteps=None, **kwargs):
-        ''' Initialize FeedbackInteractor object
+        """ Initialize FeedbackInteractor object
 
         Arguments:
             subInteractor = an Interactor object that will be used to deliver
@@ -394,7 +394,7 @@ class FeedbackInteractor(BaseInteractor):
                 will be provided. Default is None, which means feedback will
                 be provided for the full time specified by the timeSteps
                 argument.
-        '''
+        """
         super().__init__(*args, **kwargs)
         self.subInteractor = subInteractor
         self.numFeedbackNeurons = numFeedbackNeurons
@@ -432,12 +432,12 @@ class FeedbackInteractor(BaseInteractor):
             return self.latestScore
 
 class ConnectomeEvolver:
-    '''A class that handles the evolution of a population of connectoms'''
+    """A class that handles the evolution of a population of connectoms"""
     def __init__(self, seedConnectomes, interactors,
             populationSize=100, keepFrac=0.2, inputRegion="I", outputRegion="O",
             keepSeeds=False, meanNumMutations=2,
             stdNumMutations=0.5, state=None):
-        '''Instantiate a ConnectomeEvolver
+        """Instantiate a ConnectomeEvolver
 
 
         This defines how to start off the initial population, the inputs and
@@ -466,7 +466,7 @@ class ConnectomeEvolver:
             outputRegion = A region to be used for output. This region will
                 never be mutated. Note that the seed connectomes must have a
                 region by this name with enough neurons for the expected output
-        '''
+        """
 
         # If any of the seed connectomes are string paths to csv files, load
         #   them as Connectome objects.
@@ -491,7 +491,7 @@ class ConnectomeEvolver:
         self.state = state
 
     def fillPopulation(self, seedConnectomes, N, keepSeeds=False, meanNumMutations=2, stdNumMutations=0.5):
-        '''Take a seed populations, and randomly propagate them.
+        """Take a seed populations, and randomly propagate them.
 
         Arguments:
             seedConnectomes = either a list of connectome files, or a list of
@@ -507,7 +507,7 @@ class ConnectomeEvolver:
         Returns:
             A list of Connectome objects representing a randomly generated
                 population.
-        '''
+        """
 
         newPopulation = []
         if keepSeeds:
@@ -525,7 +525,7 @@ class ConnectomeEvolver:
         return newPopulation
 
     def scoreConnectome(self, connectome, nNets, testsPerNet):
-        '''Test the given Connectome object and give it a score
+        """Test the given Connectome object and give it a score
 
         Each connectome will be used to generate nNets nets. The interactors
             loaded into the ConnectomeEvolver object will be used to test and
@@ -543,7 +543,7 @@ class ConnectomeEvolver:
             A numerical score representing how accurately the nets generated
                 from the Connectome produced the target pattern on average.
 
-        '''
+        """
         scores = []
         # Generate a list of stim/target pairs, with appropriate randomization,
         #   to test each net on
@@ -569,7 +569,7 @@ class ConnectomeEvolver:
         return finalScore
 
     def scoreOutput(self, output, target, normalizeTargets=False):
-        '''Score an output matrix by comparing it to a target output matrix
+        """Score an output matrix by comparing it to a target output matrix
 
         Arguments:
             output: NxT array, where N is the number of output neurons, and
@@ -577,7 +577,7 @@ class ConnectomeEvolver:
             target: NxT array of ideal outputs. Must be the same size as
                 the output array.
 
-        '''
+        """
 
         # Calculate an activity vector, giving the mean activity for each neuron
         targetFiringRates = target.mean(axis=1)
@@ -601,7 +601,7 @@ class ConnectomeEvolver:
 
     def evolve(self, nGens=10, nNets=10, testsPerNet=3, saveDir='.', saveName='survivor',
         saveAllGenerations=False, numWorkers=None):
-        '''Evolve a connectome object
+        """Evolve a connectome object
 
         Arguments:
             nGens = number of generations to evolve
@@ -620,7 +620,7 @@ class ConnectomeEvolver:
             numWorkers = (optional) number of parallel processes to use to
                 evaluate connectomes. Default is None, which means the
                 connectomes will be evaluated serially in a single process.
-        '''
+        """
 
         # Ensure savedir exists
         saveDir = Path(saveDir);
