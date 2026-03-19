@@ -1,12 +1,14 @@
 import numpy as np
+import warnings
 try:
     # Attempt to import cupy, the GPU-accelerated replacement for numpy
     import cupy as cp
     GPU = True
     # For drop-in convenience
     cp2np = lambda x:cp.asnumpy(x)
-except:
+except (ImportError, ModuleNotFoundError):
     # cupy import failed, fall back to using numpy directly
+    warnings.warn("cupy not available, falling back to numpy (no GPU acceleration)", stacklevel=2)
     import numpy as cp
     GPU = False
     # For drop-in convenience
@@ -70,7 +72,7 @@ class Net:
         self.baseConnections = self.connections.copy()
         self.modConnections = cp.zeros([self.numNeurons, self.numNeurons])  # Modulatory connection matrix
         self.baseModConnections = self.modConnections.copy()
-        self.neurons = [Neuron(self, k) for k in range(self.numNeurons)]
+        self.positions = np.zeros([self.numNeurons, 2])
         self.activations = cp.zeros(self.numNeurons)
         self.history = cp.zeros([self.numNeurons, historyLength])
         # print('Initializing net with history size =', self.history.shape)
@@ -97,7 +99,7 @@ class Net:
                 self.refractoryPeriods = cp.array(refractoryPeriods)
         self.refractoryCountdowns = cp.zeros(self.numNeurons)
         self.connectionArrows = [[None for k in range(self.numNeurons)] for j in range(self.numNeurons)]
-        self.neuronMarkers = [None for k in range(self.numNeurons)]
+        self.neuronMarkers = [None for k in range(self.numNeurons)]  # Used by showNet for plot state
         # Neurons can be given custom attributes. Each attribute has an entry
         #   in the attributeNames array, and a corresponding row in the
         #   attribute values matrix. Attribute values must be numerical.
@@ -496,6 +498,48 @@ class Net:
         else:
             self.activations[indices] += inputs
 
+    def _resolveABIndices(self, indicesA=None, indicesB=None,
+            attributeName=None, attributeNameA=None, attributeValueA=None,
+            attributeNameB=None, attributeValueB=None):
+        '''Resolve upstream/downstream neuron indices from attribute parameters.
+
+        Handles the shared logic of expanding attributeName into A/B variants,
+        defaulting B parameters from A, calling getIndices, and checking for
+        empty index arrays.
+
+        Returns:
+            (indicesA, indicesB) if both groups are non-empty, or
+            (None, None) if either group is empty.
+        '''
+        if attributeName is not None:
+            attributeNameA = attributeName
+            attributeNameB = attributeName
+        if attributeNameB is None and attributeNameA is not None:
+            attributeNameB = attributeNameA
+        if attributeValueB is None:
+            attributeValueB = attributeValueA
+        if indicesB is None:
+            indicesB = indicesA
+        indicesA = self.getIndices(indices=indicesA, attributeName=attributeNameA, attributeValue=attributeValueA)
+        indicesB = self.getIndices(indices=indicesB, attributeName=attributeNameB, attributeValue=attributeValueB)
+
+        try:
+            if len(indicesA) == 0:
+                # Upstream neuron group is empty, do nothing.
+                return (None, None)
+        except TypeError:
+            # Probably a slice object rather than a list of indices, carry on.
+            pass
+        try:
+            if len(indicesB) == 0:
+                # Downstream neuron group is empty, do nothing.
+                return (None, None)
+        except TypeError:
+            # Probably a slice object rather than a list of indices, carry on.
+            pass
+
+        return (indicesA, indicesB)
+
     def randomizeConnections(self, n, mu, sigma, indicesA=None, indicesB=None,
             attributeName=None, attributeNameA=None, attributeValueA=None,
             attributeNameB=None, attributeValueB=None, modulatory=False,
@@ -542,32 +586,13 @@ class Net:
                 the current connection strengths. Default is True.
         '''
 
-        if attributeName is not None:
-            attributeNameA = attributeName
-            attributeNameB = attributeName
-        if attributeNameB is None and attributeNameA is not None:
-            attributeNameB = attributeNameA
-        if attributeValueB is None:
-            attributeValueB = attributeValueA
-        if indicesB is None:
-            indicesB = indicesA
-        indicesA = self.getIndices(indices=indicesA, attributeName=attributeNameA, attributeValue=attributeValueA)
-        indicesB = self.getIndices(indices=indicesB, attributeName=attributeNameB, attributeValue=attributeValueB)
-
-        try:
-            if len(indicesA) == 0:
-                # Upstream neuron group is empty do nothing.
-                return
-        except TypeError:
-            # Probably a slice object rather than a list of indices, carry on.
-            pass
-        try:
-            if len(indicesB) == 0:
-                # Upstream neuron group is empty do nothing.
-                return
-        except TypeError:
-            # Probably a slice object rather than a list of indices, carry on.
-            pass
+        indicesA, indicesB = self._resolveABIndices(
+                indicesA=indicesA, indicesB=indicesB,
+                attributeName=attributeName,
+                attributeNameA=attributeNameA, attributeValueA=attributeValueA,
+                attributeNameB=attributeNameB, attributeValueB=attributeValueB)
+        if indicesA is None:
+            return
 
         # Get random neuron coordinates
         x = np.random.choice(indicesA, size=n, replace=True)
@@ -614,8 +639,8 @@ class Net:
             attributeNameB = (optional) the attribute used to select the
                 downstream neurons. If indicesB or attributeName is supplied,
                 this is ignored.
-            attributeValueA = (optional) the attribute value to select
-                downstream neurons to connect from.
+            attributeValueB = (optional) the attribute value to select
+                downstream neurons to connect to.
             modulatory = (optional) boolean flag indicating that the modulatory
                 network instead of the direct network should be randomized.
                 Default is false (direct, not modulatory)
@@ -625,32 +650,13 @@ class Net:
                 the current connection strengths. Default is True.
         '''
 
-        if attributeName is not None:
-            attributeNameA = attributeName
-            attributeNameB = attributeName
-        if attributeNameB is None and attributeNameA is not None:
-            attributeNameB = attributeNameA
-        if attributeValueB is None:
-            attributeValueB = attributeValueA
-        if indicesB is None:
-            indicesB = indicesA
-        indicesA = self.getIndices(indices=indicesA, attributeName=attributeNameA, attributeValue=attributeValueA)
-        indicesB = self.getIndices(indices=indicesB, attributeName=attributeNameB, attributeValue=attributeValueB)
-
-        try:
-            if len(indicesA) == 0:
-                # Upstream neuron group is empty do nothing.
-                return
-        except TypeError:
-            # Probably a slice object rather than a list of indices, carry on.
-            pass
-        try:
-            if len(indicesB) == 0:
-                # Upstream neuron group is empty do nothing.
-                return
-        except TypeError:
-            # Probably a slice object rather than a list of indices, carry on.
-            pass
+        indicesA, indicesB = self._resolveABIndices(
+                indicesA=indicesA, indicesB=indicesB,
+                attributeName=attributeName,
+                attributeNameA=attributeNameA, attributeValueA=attributeValueA,
+                attributeNameB=attributeNameB, attributeValueB=attributeValueB)
+        if indicesA is None:
+            return
 
         try:
             # Check if strengths is an array or scalar.
@@ -761,7 +767,7 @@ class Net:
         # Get number of selected neurons (index in case we're dealing with a slice)
         numNeurons = len(np.arange(self.numNeurons)[indices])
 
-        if type(nInterconnects) == type(int()):
+        if isinstance(nInterconnects, int):
             # User passed in a single integer. Convert it to
             #   (nForwards, nBackwards) format
             nInterconnects = (nInterconnects, nInterconnects)
@@ -811,8 +817,7 @@ class Net:
         sRange = 100
         principalComponents[:, 1] = (sRange * (principalComponents[:, 1] - minX)/xRange)
 
-        for k in range(self.numNeurons):
-            self.neurons[k].setPosition(principalComponents[k, :])
+        self.positions = principalComponents
 
     def getPositionRanges(self, positionData):
         '''Get the x and y range for neuron spatial position values.'''
@@ -825,8 +830,8 @@ class Net:
 
         Not recommended for large nets - very slow, deprecated.
         '''
-        x = [nr.getX() for nr in self.neurons]
-        y = [nr.getY() for nr in self.neurons]
+        x = self.positions[:, 0]
+        y = self.positions[:, 1]
         maxC = np.absolute(self.connections).max()
         markerSize = 10
         markerRadius = np.sqrt(markerSize)/20
@@ -1368,7 +1373,7 @@ class Connectome:
 
 def boolParser(value):
     '''Parse a value as a boolean, allowing for strings "0" and "1"'''
-    if type(value) == type(str()):
+    if isinstance(value, str):
         return bool(int(value))
     else:
         return bool(value)
@@ -1496,93 +1501,20 @@ class ProjectingPopulation:
             of values
         parser = a function that parses a parameter value. Ignored if params are
             a tuple, instead of a comma-separated string'''
-        if type(params) == type(str()):
+        if isinstance(params, str):
             splitParams = [p.strip() for p in params.split(',')]
             if len(splitParams) == 1 and len(splitParams[0]) == 0:
                 # params is empty
                 return []
             else:
                 return [parser(s) for s in splitParams]
-        elif type(params) == type(tuple()):
+        elif isinstance(params, tuple):
             return params
 
 class NetViewer:
     '''Class allowing for visualization of nets'''
     def __init__(self, root):
         self.root = root
-
-class Neuron:
-    ''' A class for holding auxiliary attributes for a single neuron in a net.'''
-    def __init__(self, net, index, x=None, y=None):
-        '''Constructor for the Neuron class
-
-        Arguments:
-            net = the Net that this Neuron belongs to
-            index = the index within the net of this neuron
-            x = (optional) the spatial x position of the neuron
-            y = (optional) the spatial y position of the neuron
-        '''
-
-        self.net = net
-        self.index = index
-        self.position = [x, y]
-
-    def setX(self, x):
-        '''Set the spatial x position of the neuron
-
-        x = the spatial x position of the neuron
-        '''
-
-        self.position[0] = x
-
-    def setY(self, y):
-        '''Set the spatial y position of the neuron
-
-        y = the spatial y position of the neuron
-        '''
-
-        self.position[1] = y
-    def setPosition(self, position):
-        '''Set the spatial position of the neuron
-
-        Arguments:
-            position = a tuple of numbers representing the the spatial x and y
-                positions of the neuron
-        '''
-
-        self.position = position
-    def getX(self):
-        '''Get the spatial x position of the neuron
-
-        Returns:
-            x = the spatial x position of the neuron
-        '''
-        return self.position[0]
-    def getY(self):
-        '''Get the spatial y position of the neuron
-
-        Returns:
-            y = the spatial y position of the neuron
-        '''
-        return self.position[1]
-
-    def setActivation(self, activation):
-        '''Convenience function to set the activation of this neuron in the net
-
-        Arguments:
-            activation = the activation level to set the neuron's activation to
-        '''
-
-        self.net.activations[self.index] = activation
-
-    def getActivation(self):
-        '''Convenience function to get the activation of this neuron in the net
-
-        Returns:
-            activation = the activation level of this neuron
-        '''
-
-        return self.net.activations[self.index]
 
 if __name__ == "__main__":
     '''Code to run when this module is run directly, rather than imported
