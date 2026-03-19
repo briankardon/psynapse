@@ -197,7 +197,11 @@ class Net:
         else:
             reverseMap = dict([(attributeMap[v], v) for v in attributeMap])
             if len(reverseMap) < len(attributeMap):
-                warnings.warn('Provided attributeMap is not a 1:1 reversible mapping. This may result in unexpected behavior.')
+                warnings.warn(
+                    'Provided attributeMap is not a 1:1'
+                    ' reversible mapping. This may'
+                    ' result in unexpected behavior.'
+                )
         self.attributeMapsReversed.append(reverseMap)
         self.attributeValues = np.pad(self.attributeValues, ([0, 1], [0, 0]))
         if initialValues is not None:
@@ -247,9 +251,16 @@ class Net:
             indices = np.s_[:]
         if mapped:
             if self.attributeMaps[idx] is None:
-                raise KeyError('Cannot return mapped attribute values, because the selected attribute does not have a map.')
+                raise KeyError(
+                    'Cannot return mapped attribute'
+                    ' values, because the selected'
+                    ' attribute does not have a map.'
+                )
             else:
-                return [self.attributeMaps[idx][v] for v in self.attributeValues[idx, indices]]
+                return [
+                    self.attributeMaps[idx][v]
+                    for v in self.attributeValues[idx, indices]
+                ]
         else:
             return self.attributeValues[idx, indices]
 
@@ -298,7 +309,9 @@ class Net:
         """
         return np.unique(self.getAttributes(name, mapped=mapped))
 
-    def setAttributes(self, name, values=0, mapped=False, indices=None, addIfNonexistent=True, attributeMap=None):
+    def setAttributes(self, name, values=0, mapped=False,
+                      indices=None, addIfNonexistent=True,
+                      attributeMap=None):
         """Set an array of values for the specified attribute.
 
         Arguments:
@@ -341,29 +354,53 @@ class Net:
         # Pass signal from firing neurons downstream
         self.activations = firing.dot(self.connections)
         # Reset fired neurons to max countdown, continuing decrementing the rest.
-        self.refractoryCountdowns = (self.refractoryPeriods * firing) + ((self.refractoryCountdowns - 1) * notFiring)
+        self.refractoryCountdowns = (
+            (self.refractoryPeriods * firing)
+            + ((self.refractoryCountdowns - 1) * notFiring)
+        )
         # Pass modulatory signals. Add the modulatory signal to the downstream
         #   neuron's threshold, then move all threshold towards each neuron's
         #   base threshold.
-        self.thresholds += firing.dot(self.modConnections) + self.homeostaticPlasticityFactor * (self.baseThresholds - self.thresholds)
+        self.thresholds += (
+            firing.dot(self.modConnections)
+            + self.homeostaticPlasticityFactor
+            * (self.baseThresholds - self.thresholds)
+        )
         if self.hebbianPlasticityRate != 0:
             # Create matrix of firing coincidences (where C[a, b] = 1 if b fired,
             #   and a fired on the last step), then multiply by the hebbian
             #   plasticity factor, to determine learning changes in network
             if GPU:
-                hebbianPlasticity = cp.logical_and(firing[:, None], self.history[:, 1]) * (self.connections != 0) * self.hebbianPlasticityRate
+                hebbianPlasticity = (
+                    cp.logical_and(
+                        firing[:, None],
+                        self.history[:, 1]
+                    )
+                    * (self.connections != 0)
+                    * self.hebbianPlasticityRate
+                )
             else:
-                hebbianPlasticity = np.logical_and.outer(firing, self.history[:, 1]) * (self.connections != 0) * self.hebbianPlasticityRate
+                hebbianPlasticity = (
+                    np.logical_and.outer(
+                        firing, self.history[:, 1]
+                    )
+                    * (self.connections != 0)
+                    * self.hebbianPlasticityRate
+                )
         else:
             hebbianPlasticity = 0
         if self.homeostaticPlasticityFactor != 0:
             # Create matrix to represent homeostatic relaxation of connection strengths
-            homeostaticPlasticity = (self.baseConnections - self.connections) * self.homeostaticPlasticityFactor
+            homeostaticPlasticity = (
+                (self.baseConnections - self.connections)
+                * self.homeostaticPlasticityFactor
+            )
         else:
             homeostaticPlasticity = 0
         self.connections += hebbianPlasticity + homeostaticPlasticity
 
-    def getIndices(self, indices=None, attributeName=None, attributeValue=None, mapped=False):
+    def getIndices(self, indices=None, attributeName=None,
+                   attributeValue=None, mapped=False):
         """Get a list of selected neuron indices.
 
         Arguments:
@@ -382,7 +419,9 @@ class Net:
         """
 
         if attributeName is not None:
-            indices = self.filterByAttribute(attributeName, attributeValue, mapped=mapped)
+            indices = self.filterByAttribute(
+                attributeName, attributeValue, mapped=mapped
+            )
         if indices is None:
             indices = np.arange(self.numNeurons)
         try:
@@ -394,7 +433,8 @@ class Net:
 
         return indices
 
-    def getOutput(self, timeLag=0, indices=None, attributeName=None, attributeValue=None):
+    def getOutput(self, timeLag=0, indices=None,
+                  attributeName=None, attributeValue=None):
         """Get activations of neurons indicated by indices at the indicated time.
 
         Note that this will only get activations that are in the history; i.e.
@@ -417,13 +457,18 @@ class Net:
             The activations of the selected neurons.
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
         if GPU:
             return self.history[indices, timeLag].get()
         else:
             return self.history[indices, timeLag]
 
-    def getOutputSequence(self, times, indices=None, attributeName=None, attributeValue=None):
+    def getOutputSequence(self, times, indices=None,
+                          attributeName=None,
+                          attributeValue=None):
         """Get activations of neurons indicated by indices at given timepoints.
 
         Note that this will only get activations that are in the history; i.e.
@@ -447,7 +492,10 @@ class Net:
             The activations of the selected neurons.
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
 
         return self.history[indices, times]
 
@@ -473,13 +521,17 @@ class Net:
             The average firing rate of the selected neurons.
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
 
         if averagingTime is None:
             averagingTime = self.getHistoryLength()
         return np.mean(self.history[indices, :averagingTime], axis=1)
 
-    def setInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
+    def setInput(self, inputs, indices=None,
+                 attributeName=None, attributeValue=None):
         """Set activations of neurons indicated by indices to given input values.
 
         Neurons can be selected by indices or attribute name/value pair.
@@ -495,11 +547,15 @@ class Net:
                 neurons to set activations for
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
 
         self.activations[indices] = inputs
 
-    def addInput(self, inputs, indices=None, attributeName=None, attributeValue=None):
+    def addInput(self, inputs, indices=None,
+                 attributeName=None, attributeValue=None):
         """Add input values to activations of neurons indicated by indices.
 
         Neurons can be selected by indices or attribute name/value pair.
@@ -518,7 +574,10 @@ class Net:
                 neurons to set activations for
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
 
         if GPU:
             self.activations[indices] += cp.array(inputs)
@@ -547,8 +606,16 @@ class Net:
             attributeValueB = attributeValueA
         if indicesB is None:
             indicesB = indicesA
-        indicesA = self.getIndices(indices=indicesA, attributeName=attributeNameA, attributeValue=attributeValueA)
-        indicesB = self.getIndices(indices=indicesB, attributeName=attributeNameB, attributeValue=attributeValueB)
+        indicesA = self.getIndices(
+            indices=indicesA,
+            attributeName=attributeNameA,
+            attributeValue=attributeValueA
+        )
+        indicesB = self.getIndices(
+            indices=indicesB,
+            attributeName=attributeNameB,
+            attributeValue=attributeValueB
+        )
 
         try:
             if len(indicesA) == 0:
@@ -724,13 +791,19 @@ class Net:
                 the current threshold. Default is True.
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
         if setCurrent:
             self.thresholds[indices] = thresholds
         if setBase:
             self.baseThresholds[indices] = thresholds
 
-    def setRefractoryPeriods(self, refractoryPeriods, indices=None, attributeName=None, attributeValue=None):
+    def setRefractoryPeriods(self, refractoryPeriods,
+                             indices=None,
+                             attributeName=None,
+                             attributeValue=None):
         """Set the refractory periods of the specified neurons.
 
         Neurons can be selected by indices or attribute name/value pair.
@@ -746,7 +819,10 @@ class Net:
                 neurons to set refractory period for
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
         self.refractoryPeriods[indices] = refractoryPeriods
 
     def createChain(self):
@@ -760,7 +836,10 @@ class Net:
         indicesB = np.roll(indicesA, -1)
         self.setConnections(10, indicesA=indicesA, indicesB=indicesB)
 
-    def createLayers(self, nLayers=1, nIntraconnects=1, nInterconnects=1, mu=0, sigma=1, indices=None, attributeName=None, attributeValue=None):
+    def createLayers(self, nLayers=1, nIntraconnects=1,
+                      nInterconnects=1, mu=0, sigma=1,
+                      indices=None, attributeName=None,
+                      attributeValue=None):
         """An algorithm for adding a layered topology to part of the net.
 
         The selected neurons will be assigned to layers. Each layer will be
@@ -788,7 +867,10 @@ class Net:
                 neurons to include in layered topology
         """
 
-        indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
+        indices = self.getIndices(
+            indices=indices, attributeName=attributeName,
+            attributeValue=attributeValue
+        )
         # Get number of selected neurons (index in case we're dealing with a slice)
         numNeurons = len(np.arange(self.numNeurons)[indices])
 
@@ -797,8 +879,12 @@ class Net:
             #   (nForwards, nBackwards) format
             nInterconnects = (nInterconnects, nInterconnects)
 
-        layerNumbers = np.array([np.floor(x/(numNeurons/nLayers)) for x in range(numNeurons)])
-        # Give all neurons a layer number of NaN, so they are unselectable by layer number
+        layerNumbers = np.array([
+            np.floor(x / (numNeurons / nLayers))
+            for x in range(numNeurons)
+        ])
+        # Give all neurons a layer number of NaN, so they are
+        # unselectable by layer number
         self.setAttributes('layer', values=np.nan, indices=np.s_[:])
         # Set layer numbers of specific neurons selected to be in layers to the
         #   correct layer value
@@ -806,12 +892,26 @@ class Net:
         layerNums = self.getUniqueAttributes('layer')
         for k, layerNum in enumerate(layerNums):
             # Make within-layer connections
-            self.randomizeConnections(nIntraconnects, mu, sigma, attributeName='layer', attributeValueA=layerNum)
+            self.randomizeConnections(
+                nIntraconnects, mu, sigma,
+                attributeName='layer',
+                attributeValueA=layerNum
+            )
             if k < len(layerNums)-1:
                 # Make interconnections between adjacent layers
                 nextLayerNum = layerNums[k+1]
-                self.randomizeConnections(nInterconnects[0], mu, sigma, attributeName='layer', attributeValueA=layerNum, attributeValueB=nextLayerNum)
-                self.randomizeConnections(nInterconnects[1], mu, sigma, attributeName='layer', attributeValueA=nextLayerNum, attributeValueB=layerNum)
+                self.randomizeConnections(
+                    nInterconnects[0], mu, sigma,
+                    attributeName='layer',
+                    attributeValueA=layerNum,
+                    attributeValueB=nextLayerNum
+                )
+                self.randomizeConnections(
+                    nInterconnects[1], mu, sigma,
+                    attributeName='layer',
+                    attributeValueA=nextLayerNum,
+                    attributeValueB=layerNum
+                )
 
     def arrangeNeurons(self):
         """Attempt to give neurons spatial positions.
@@ -833,8 +933,16 @@ class Net:
         # Get coordinate scales
         _, xRange, yRange = getRanges(principalComponents)
         # Add jitter
-        principalComponents[:, 0] = principalComponents[:, 0] + (xRange/20) * (np.random.rand(self.numNeurons)-0.5)
-        principalComponents[:, 1] = principalComponents[:, 1] + (yRange/20) * (np.random.rand(self.numNeurons)-0.5)
+        principalComponents[:, 0] = (
+            principalComponents[:, 0]
+            + (xRange / 20)
+            * (np.random.rand(self.numNeurons) - 0.5)
+        )
+        principalComponents[:, 1] = (
+            principalComponents[:, 1]
+            + (yRange / 20)
+            * (np.random.rand(self.numNeurons) - 0.5)
+        )
         # Get new coordinate scales
         minX, xRange, yRange = getRanges(principalComponents)
         # Scale coordinates to a standard range
@@ -854,7 +962,12 @@ class Net:
         """
 
         # Position data must be a Nx2 array of x,y coordinates
-        return ((np.min(positionData[:, 0]), np.max(positionData[:, 0])), (np.min(positionData[:, 1]), np.max(positionData[:, 1])))
+        return (
+            (np.min(positionData[:, 0]),
+             np.max(positionData[:, 0])),
+            (np.min(positionData[:, 1]),
+             np.max(positionData[:, 1]))
+        )
 
     def showNet(self):
         """Display graphical representation of net.
@@ -896,8 +1009,19 @@ class Net:
                     sideOffset = markerRadius * dir2Hat
                     p1 = p1 + sideOffset
                     p2 = p2 - sideOffset
-                    self.connectionArrows[k][j] = patches.FancyArrowPatch(p1, p2, arrowstyle=ars, color=color, alpha=brightness, connectionstyle=cs)
-#                    self.connectionArrows[k][j] = plt.arrow(p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1], color=color, alpha=brightness, head_width=0.1)
+                    self.connectionArrows[k][j] = (
+                        patches.FancyArrowPatch(
+                            p1, p2,
+                            arrowstyle=ars,
+                            color=color,
+                            alpha=brightness,
+                            connectionstyle=cs
+                        )
+                    )
+#                    self.connectionArrows[k][j] = plt.arrow(
+#                        p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1],
+#                        color=color, alpha=brightness,
+#                        head_width=0.1)
                 else:
                     # Synapse
                     dir = p2 - p1
@@ -912,8 +1036,18 @@ class Net:
                     forwardOffset = markerRadius * dirHat
                     p1 = p1 + sideOffset + forwardOffset
                     p2 = p2 + sideOffset - forwardOffset
-                    self.connectionArrows[k][j] = patches.FancyArrowPatch(p1, p2, arrowstyle=ars, color=color, alpha=brightness)
-#                    self.connectionArrows[k][j] = plt.arrow(p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1], color=color, alpha=brightness, head_width=0.1)
+                    self.connectionArrows[k][j] = (
+                        patches.FancyArrowPatch(
+                            p1, p2,
+                            arrowstyle=ars,
+                            color=color,
+                            alpha=brightness
+                        )
+                    )
+#                    self.connectionArrows[k][j] = plt.arrow(
+#                        p1[0], p1[1], p2[0]-p1[0], p2[1]-p1[1],
+#                        color=color, alpha=brightness,
+#                        head_width=0.1)
                 ax.add_patch(self.connectionArrows[k][j])
         plt.show()
 
@@ -980,7 +1114,11 @@ class Net:
             if verbose: print('runInteraction: t=', t);
             try:
                 # print('got outputs:', self.getOutput(indices=outputIndices))
-                newInput = interactor.next(lastOutputs=self.getOutput(indices=outputIndices))
+                newInput = interactor.next(
+                    lastOutputs=self.getOutput(
+                        indices=outputIndices
+                    )
+                )
                 if verbose: print('runInteraction: Next input=', newInput);
             except StopIteration:
                 # Done stimulating
@@ -996,10 +1134,23 @@ class Net:
                 # Going to lose output if we don't expand history
                 self.setHistoryLength(t)
 
-        if verbose: print('runInteraction: Output=', self.getOutputSequence(np.s_[:t], indices=outputIndices))
-        return self.getOutputSequence(np.s_[:t], indices=outputIndices)
+        if verbose:
+            print(
+                'runInteraction: Output=',
+                self.getOutputSequence(
+                    np.s_[:t], indices=outputIndices
+                )
+            )
+        return self.getOutputSequence(
+            np.s_[:t], indices=outputIndices
+        )
 
-    def runSequence(self, inputs, inputIndices=None, inputAttributeName=None, inputAttributeValue=None, outputIndices=None, outputAttributeName=None, outputAttributeValue=None):
+    def runSequence(self, inputs, inputIndices=None,
+                    inputAttributeName=None,
+                    inputAttributeValue=None,
+                    outputIndices=None,
+                    outputAttributeName=None,
+                    outputAttributeValue=None):
         """Run neural network with a sequence of inputs, and return the outputs.
 
         This differs from runPattern - instead of Interactor object, input is
@@ -1023,12 +1174,26 @@ class Net:
                 select neurons to get output from
         """
 
-        inputIndices = self.getIndices(indices=inputIndices, attributeName=inputAttributeName, attributeValue=inputAttributeValue)
-        outputIndices = self.getIndices(indices=outputIndices, attributeName=outputAttributeName, attributeValue=outputAttributeValue)
+        inputIndices = self.getIndices(
+            indices=inputIndices,
+            attributeName=inputAttributeName,
+            attributeValue=inputAttributeValue
+        )
+        outputIndices = self.getIndices(
+            indices=outputIndices,
+            attributeName=outputAttributeName,
+            attributeValue=outputAttributeValue
+        )
 
         N, T = inputs.shape
         if not N == len(inputIndices):
-            raise IndexError('Error, size of input axis 0 ({S}) should match the number of neurons selected ({N}).'.format(S=N, N=len(inputIndices)))
+            raise IndexError(
+                'Error, size of input axis 0 ({S})'
+                ' should match the number of neurons'
+                ' selected ({N}).'.format(
+                    S=N, N=len(inputIndices)
+                )
+            )
 
         if T > self.getHistoryLength():
             print('Expanding net history to accomodate sequence length')
@@ -1039,7 +1204,9 @@ class Net:
             self.addInput(inputs[:, t], indices=inputIndices)
             self.activate()
 
-        return self.getOutputSequence(np.s_[:T], indices=outputIndices)
+        return self.getOutputSequence(
+            np.s_[:T], indices=outputIndices
+        )
 
 class Connectome:
     """A class representing a set of projecting populations of neurons.
@@ -1109,12 +1276,19 @@ class Connectome:
                 self.populations.append(ProjectingPopulation(*row))
         # Get a unique list of region names
         upstreamRegions = set(p.regionName for p in self.populations)
-        downstreamRegions = set([region for p in self.populations for region in p.connectedRegions])
+        downstreamRegions = set([
+            region
+            for p in self.populations
+            for region in p.connectedRegions
+        ])
         self.regionNames = list(upstreamRegions | downstreamRegions)
         # Create a mapping from region ID ==> region name
         self.regionNameMap = dict(zip(range(len(self.regionNames)), self.regionNames))
         # Create a mapping from region name ==> region ID
-        self.regionNameReverseMap = dict(zip(self.regionNames, range(len(self.regionNames))))
+        self.regionNameReverseMap = dict(
+            zip(self.regionNames,
+                range(len(self.regionNames)))
+        )
 
     def createNet(self, **kwargs):
         """Construct net according to connectome specification.
@@ -1126,16 +1300,24 @@ class Connectome:
         numNeurons = []
         totalNumNeurons = 0
         for k in range(len(self.populations)):
-            newNumNeurons = int(np.round(np.random.normal(loc=self.populations[k].meanNumNeurons, scale=self.populations[k].stdNumNeurons)))
+            newNumNeurons = int(np.round(
+                np.random.normal(
+                    loc=self.populations[k].meanNumNeurons,
+                    scale=self.populations[k].stdNumNeurons
+                )
+            ))
             numNeurons.append(newNumNeurons)
             totalNumNeurons += numNeurons[-1]
 
         populationIDs = []
         regionIDs = []
 
-        # Get a list of the population and region IDs of each neuron so we can make them attributes in the net later
+        # Get a list of the population and region IDs of each
+        # neuron so we can make them attributes in the net later
         for k in range(len(self.populations)):
-            # Create a list of population IDs - each population is within one region, and projects to a set of other regions
+            # Create a list of population IDs - each population
+            # is within one region, and projects to a set of
+            # other regions
             populationIDs.extend([k for j in range(numNeurons[k])])
             # Create a list of region IDs - each region is a named group of neurons
             regionID = self.regionNameReverseMap[self.populations[k].regionName]
@@ -1143,8 +1325,14 @@ class Connectome:
 
         # print('Total neurons = ', totalNumNeurons)
 
-        n = Net(numNeurons=totalNumNeurons, refractoryPeriodMean=4, refractoryPeriodSigma=3, **kwargs)
-        # Set an attribute marking each neuron with its region number and population number
+        n = Net(
+            numNeurons=totalNumNeurons,
+            refractoryPeriodMean=4,
+            refractoryPeriodSigma=3,
+            **kwargs
+        )
+        # Set an attribute marking each neuron with its region
+        # number and population number
         n.setAttributes('population', values=populationIDs)
         n.setAttributes('region',     values=regionIDs, attributeMap=self.regionNameMap)
 
@@ -1154,26 +1342,54 @@ class Connectome:
                 loc=self.populations[k].meanThreshold,
                 scale=self.populations[k].stdThreshold,
                 size=numNeurons[k])
-            n.setThresholds(thresholds, attributeName='population', attributeValue=k, setBase=False, setCurrent=True)
+            n.setThresholds(
+                thresholds,
+                attributeName='population',
+                attributeValue=k,
+                setBase=False, setCurrent=True
+            )
             # Set refractory periods
             refractoryPeriods = np.random.normal(
                 loc=self.populations[k].meanRefractoryPeriod,
                 scale=self.populations[k].stdRefractoryPeriod,
                 size=numNeurons[k])
-            n.setRefractoryPeriods(refractoryPeriods, attributeName='population', attributeValue=k)
+            n.setRefractoryPeriods(
+                refractoryPeriods,
+                attributeName='population',
+                attributeValue=k
+            )
             # Get a list of region IDs that this population projects to
-            connectedRegionIDs = [self.regionNameReverseMap[cr] for cr in self.populations[k].connectedRegions]
+            connectedRegionIDs = [
+                self.regionNameReverseMap[cr]
+                for cr in self.populations[k].connectedRegions
+            ]
             if len(connectedRegionIDs) == 0:
                 # This region has no outgoing projections.
                 continue
             # Determine how many connections to make
-            numConnections = max(0, numNeurons[k] * np.round(np.random.normal(loc=self.populations[k].meanNumConnections, scale=self.populations[k].stdNumConnections)).astype('int'))
+            numConnections = max(
+                0,
+                numNeurons[k] * np.round(
+                    np.random.normal(
+                        loc=self.populations[k].meanNumConnections,
+                        scale=self.populations[k].stdNumConnections
+                    )
+                ).astype('int')
+            )
             # Choose how many connections will go to each downstream regions
-            connections = np.random.choice(connectedRegionIDs, size=numConnections, p=self.populations[k].connectionProbabilities)
+            connections = np.random.choice(
+                connectedRegionIDs,
+                size=numConnections,
+                p=self.populations[k].connectionProbabilities
+            )
             # Loop over each downstream region and add connections
             for j in range(len(connectedRegionIDs)):
                 regionalConnectionCount = sum(connections == connectedRegionIDs[j])
-                # print('making {n} connections from {a} to {b}'.format(n=regionalConnectionCount, a=k, b=self.regionNameMap[connectedRegionIDs[j]]))
+                # print('making {n} connections from {a} to'
+                #       ' {b}'.format(
+                #     n=regionalConnectionCount, a=k,
+                #     b=self.regionNameMap[
+                #         connectedRegionIDs[j]]))
                 n.randomizeConnections(regionalConnectionCount,
                     self.populations[k].meanConnectionStrength,
                     self.populations[k].stdConnectionStrength,
@@ -1243,15 +1459,40 @@ class Connectome:
             meanConnectionStrength, numProjections, fractionModulatory,
             refractoryPeriod, threshold, numConnections.
         """
+        modNeurons = sum([
+            pop.meanNumNeurons
+            for pop in self.populations if pop.modulatory
+        ])
+        totalNeurons = sum([
+            pop.meanNumNeurons
+            for pop in self.populations
+        ])
         return dict(
-            numPopulations = len(self.populations),
-            numNeurons = sum([pop.meanNumNeurons for pop in self.populations]),
-            meanConnectionStrength = cp.mean([pop.meanConnectionStrength for pop in self.populations]),
-            numProjections = sum([len(pop.connectedRegions) for pop in self.populations]),
-            fractionModulatory = sum([pop.meanNumNeurons for pop in self.populations if pop.modulatory])/sum([pop.meanNumNeurons for pop in self.populations]),
-            refractoryPeriod = cp.mean([pop.meanRefractoryPeriod for pop in self.populations]),
-            threshold = cp.mean([pop.meanThreshold for pop in self.populations]),
-            numConnections = sum([pop.meanNumConnections for pop in self.populations]),
+            numPopulations=len(self.populations),
+            numNeurons=totalNeurons,
+            meanConnectionStrength=cp.mean([
+                pop.meanConnectionStrength
+                for pop in self.populations
+            ]),
+            numProjections=sum([
+                len(pop.connectedRegions)
+                for pop in self.populations
+            ]),
+            fractionModulatory=(
+                modNeurons / totalNeurons
+            ),
+            refractoryPeriod=cp.mean([
+                pop.meanRefractoryPeriod
+                for pop in self.populations
+            ]),
+            threshold=cp.mean([
+                pop.meanThreshold
+                for pop in self.populations
+            ]),
+            numConnections=sum([
+                pop.meanNumConnections
+                for pop in self.populations
+            ]),
         )
 
     def mutate(self, noProjectRegions=None, immutableRegions=None, verbose=False):
@@ -1271,7 +1512,12 @@ class Connectome:
             immutableRegions = []
 
         # Choose a population index to mutate
-        mutablePopulations = [idx for idx in range(len(self.populations)) if self.populations[idx].regionName not in immutableRegions]
+        mutablePopulations = [
+            idx
+            for idx in range(len(self.populations))
+            if self.populations[idx].regionName
+            not in immutableRegions
+        ]
 
         if len(mutablePopulations) == 0:
             # Could change this so it generates a new randomized population
@@ -1282,7 +1528,13 @@ class Connectome:
         popIndex = np.random.choice(mutablePopulations)
         pop = self.populations[popIndex]
         if verbose:
-            print('Selected population #{p} of {n}'.format(p=popIndex, n=len(mutablePopulations)))
+            print(
+                'Selected population #{p} of {n}'
+                .format(
+                    p=popIndex,
+                    n=len(mutablePopulations)
+                )
+            )
 
         # Define mutable parameters - how should we mutate this population?
         mutableParameters = [
@@ -1333,9 +1585,16 @@ class Connectome:
         if param == "connectedRegions":
             # Mutate regions that are projected to (form a new projection to a
             #   new region, or prune a projection)
-            allowableRegions = [r for r in self.regionNames if r not in noProjectRegions and r not in immutableRegions]
+            allowableRegions = [
+                r for r in self.regionNames
+                if r not in noProjectRegions
+                and r not in immutableRegions
+            ]
             numConnectedRegions = len(pop.connectedRegions)
-            numRemovableConnectedRegions = len([r for r in pop.connectedRegions if r not in immutableRegions])
+            numRemovableConnectedRegions = len([
+                r for r in pop.connectedRegions
+                if r not in immutableRegions
+            ])
             # Determine whether to add or remove a connected region
             if numConnectedRegions == len(allowableRegions):
                 # Max # of connected regions. Remove one
@@ -1349,25 +1608,54 @@ class Connectome:
                 #   Remove is more likely is # of connected regions is high
                 #   If # of connected regions is equal to half the number of
                 #   allowable connected regions, probability is 50/50
-                deltaProbs = np.array([numConnectedRegions, len(allowableRegions) - numConnectedRegions])
+                deltaProbs = np.array([
+                    numConnectedRegions,
+                    len(allowableRegions)
+                    - numConnectedRegions
+                ])
                 deltaProbs = deltaProbs / np.sum(deltaProbs)
                 # Choose how many to add/remove
                 regionDelta = np.random.choice([-1, 1], p=deltaProbs)
             if regionDelta > 0:
                 # Add one or more regions
-                unusedRegions = [r for r in allowableRegions if r not in pop.connectedRegions]
+                unusedRegions = [
+                    r for r in allowableRegions
+                    if r not in pop.connectedRegions
+                ]
                 newConnectedRegions = np.random.choice(unusedRegions, size=regionDelta)
                 pop.connectedRegions.extend(newConnectedRegions)
                 # Generate new connection probabilties
                 newConnectionProbabilties = np.random.random(size=regionDelta)
-                pop.connectionProbabilities = np.append(pop.connectionProbabilities * numConnectedRegions, newConnectionProbabilties)
-                pop.connectionProbabilities = pop.connectionProbabilities / np.sum(pop.connectionProbabilities)
+                pop.connectionProbabilities = np.append(
+                    pop.connectionProbabilities
+                    * numConnectedRegions,
+                    newConnectionProbabilties
+                )
+                pop.connectionProbabilities = (
+                    pop.connectionProbabilities
+                    / np.sum(pop.connectionProbabilities)
+                )
             else:
                 # Remove one or more regions
-                removableRegionIndices = [idx for idx in range(numConnectedRegions) if pop.connectedRegions[idx] not in immutableRegions]
-                indicesToRemove = np.random.choice(removableRegionIndices, size=-regionDelta)
-                pop.connectedRegions = [r for j, r in enumerate(pop.connectedRegions) if j not in indicesToRemove]
-                pop.connectionProbabilities = np.delete(pop.connectionProbabilities, indicesToRemove)
+                removableRegionIndices = [
+                    idx
+                    for idx in range(numConnectedRegions)
+                    if pop.connectedRegions[idx]
+                    not in immutableRegions
+                ]
+                indicesToRemove = np.random.choice(
+                    removableRegionIndices,
+                    size=-regionDelta
+                )
+                pop.connectedRegions = [
+                    r for j, r
+                    in enumerate(pop.connectedRegions)
+                    if j not in indicesToRemove
+                ]
+                pop.connectionProbabilities = np.delete(
+                    pop.connectionProbabilities,
+                    indicesToRemove
+                )
         elif param == "connectionProbabilities":
             # Pick which probability to change
             j = np.random.choice(range(len(pop.connectionProbabilities)))
@@ -1380,7 +1668,8 @@ class Connectome:
             # Renormalize
             pop.connectionProbabilities /= sum(pop.connectionProbabilities)
         elif param in ["meanThreshold", "meanConnectionStrength"]:
-            # Mutate one of the purely numerical mean parameters that can be positive or negative
+            # Mutate one of the purely numerical mean
+            # parameters that can be positive or negative
             val = getattr(pop, param)
             # Compute scale of random variation - half the value, but at least 1.
             scale = max(1, abs(val)/2)
@@ -1413,7 +1702,7 @@ class Connectome:
             self.populations.pop(popIndex)
 
 def boolParser(value):
-    """Parse a value as a boolean, allowing for strings "0" and "1""""
+    """Parse a value as a boolean, allowing for "0" and "1"."""
     if isinstance(value, str):
         return bool(int(value))
     else:
@@ -1463,7 +1752,9 @@ class ProjectingPopulation:
         # Parse all text fields into usable population attributes
         self.regionName = regionA
         self.populationName = populationName
-        (self.meanNumNeurons,self.stdNumNeurons) = self.unpackParam(numNeurons, parser=int)
+        (self.meanNumNeurons, self.stdNumNeurons) = (
+            self.unpackParam(numNeurons, parser=int)
+        )
         self.connectedRegions = self.unpackParam(regionsB, parser=str)
         if len(self.connectedRegions) == 0:
             # No downstream connected regions given
@@ -1472,8 +1763,18 @@ class ProjectingPopulation:
             self.meanConnectionStrength = 0
             self.stdConnectionStrength = 0
         else:
-            (self.meanNumConnections, self.stdNumConnections) = self.unpackParam(numConnections, parser=float)
-            (self.meanConnectionStrength, self.stdConnectionStrength) = self.unpackParam(connectionStrength, parser=float)
+            (self.meanNumConnections,
+             self.stdNumConnections) = (
+                self.unpackParam(
+                    numConnections, parser=float
+                )
+            )
+            (self.meanConnectionStrength,
+             self.stdConnectionStrength) = (
+                self.unpackParam(
+                    connectionStrength, parser=float
+                )
+            )
         proportions = np.array(self.unpackParam(proportions, parser=float))
         if len(proportions) == 0:
             # No proportions given
@@ -1481,15 +1782,35 @@ class ProjectingPopulation:
         else:
             self.connectionProbabilities = proportions / np.sum(proportions)
         (self.modulatory,) = self.unpackParam(modulatory, parser=boolParser)
-        (self.meanThreshold, self.stdThreshold) = self.unpackParam(thresholds, parser=float)
-        (self.meanRefractoryPeriod, self.stdRefractoryPeriod) = self.unpackParam(refractoryPeriods, parser=float)
+        (self.meanThreshold, self.stdThreshold) = (
+            self.unpackParam(thresholds, parser=float)
+        )
+        (self.meanRefractoryPeriod,
+         self.stdRefractoryPeriod) = (
+            self.unpackParam(
+                refractoryPeriods, parser=float
+            )
+        )
         self.tags = self.unpackParam(tags, parser=str)
         self.notes = notes
 
     def __str__(self):
         """Return a human-readable summary of this population's parameters."""
-        connections = '|'.join('{r}({p:.02f})'.format(r=r, p=p) for r, p in zip(self.connectedRegions, self.connectionProbabilities))
-        return 'N={mn:.02f}+/-{sn:.02f} {r}==>{c} N={mc:.02f}+/-{sc:.02f} strength={ms:.02f}+/-{ss:.02f} refractory={mr:.02f}+/-{sr:.02f} threshold={mt:.02f}+/-{st:.02f}'.format(
+        connections = '|'.join(
+            '{r}({p:.02f})'.format(r=r, p=p)
+            for r, p in zip(
+                self.connectedRegions,
+                self.connectionProbabilities
+            )
+        )
+        return (
+            'N={mn:.02f}+/-{sn:.02f}'
+            ' {r}==>{c}'
+            ' N={mc:.02f}+/-{sc:.02f}'
+            ' strength={ms:.02f}+/-{ss:.02f}'
+            ' refractory={mr:.02f}+/-{sr:.02f}'
+            ' threshold={mt:.02f}+/-{st:.02f}'
+        ).format(
             mn=self.meanNumNeurons, sn=self.stdNumNeurons,
             r=self.regionName, c=connections, mc=self.meanNumConnections,
             sc=self.stdNumConnections, ms=self.meanConnectionStrength,
@@ -1515,17 +1836,38 @@ class ProjectingPopulation:
         regionsB = ','.join(self.connectedRegions)
         populationName = self.populationName
         proportions = ','.join([str(p) for p in self.connectionProbabilities])
-        numNeurons = '{mu},{sigma}'.format(mu=self.meanNumNeurons, sigma=self.stdNumNeurons)
+        numNeurons = '{mu},{sigma}'.format(
+            mu=self.meanNumNeurons,
+            sigma=self.stdNumNeurons
+        )
         modulatory = '1' if self.modulatory else '0'
-        thresholds = '{mu},{sigma}'.format(mu=self.meanThreshold, sigma=self.stdThreshold)
-        refractoryPeriods = '{mu},{sigma}'.format(mu=self.meanRefractoryPeriod, sigma=self.stdRefractoryPeriod)
-        numConnections = '{mu},{sigma}'.format(mu=self.meanNumConnections, sigma=self.stdNumConnections)
-        connectionStrength = '{mu},{sigma}'.format(mu=self.meanConnectionStrength, sigma=self.stdConnectionStrength)
+        thresholds = '{mu},{sigma}'.format(
+            mu=self.meanThreshold,
+            sigma=self.stdThreshold
+        )
+        refractoryPeriods = '{mu},{sigma}'.format(
+            mu=self.meanRefractoryPeriod,
+            sigma=self.stdRefractoryPeriod
+        )
+        numConnections = '{mu},{sigma}'.format(
+            mu=self.meanNumConnections,
+            sigma=self.stdNumConnections
+        )
+        connectionStrength = '{mu},{sigma}'.format(
+            mu=self.meanConnectionStrength,
+            sigma=self.stdConnectionStrength
+        )
         tags = ','.join(self.tags)
         notes = self.notes
 
         # Return all text fields in the expected order
-        return regionA, regionsB, populationName, proportions, numNeurons, modulatory, thresholds, refractoryPeriods, numConnections, connectionStrength, tags, notes
+        return (
+            regionA, regionsB, populationName,
+            proportions, numNeurons, modulatory,
+            thresholds, refractoryPeriods,
+            numConnections, connectionStrength,
+            tags, notes
+        )
 
     def unpackParam(self, params, parser=float):
         """Unpack a parameter from CSV string or tuple form.
@@ -1572,7 +1914,10 @@ if __name__ == "__main__":
 
     """
 
-    np.set_printoptions(linewidth=100000, formatter=dict(float=lambda x: "% 0.1f" % x))
+    np.set_printoptions(
+        linewidth=100000,
+        formatter=dict(float=lambda x: "% 0.1f" % x)
+    )
 
     initType = sys.argv[1]
 
@@ -1587,10 +1932,18 @@ if __name__ == "__main__":
     if initType == 'layers':
         N = 1000
         NL = N//100
-        n = Net(N, refractoryPeriodMean=10, refractoryPeriodSigma=7, historyLength=T) #, hebbianPlasticityRate=0)
+        n = Net(
+            N, refractoryPeriodMean=10,
+            refractoryPeriodSigma=7,
+            historyLength=T
+        )  #, hebbianPlasticityRate=0)
         regularIndices = np.arange(0, 1000)
         # modulatoryIndices = np.arange(800, N)
-        n.createLayers(nLayers=NL, nIntraconnects=N, nInterconnects=N//10, mu=0.7, sigma=2, indices=regularIndices)
+        n.createLayers(
+            nLayers=NL, nIntraconnects=N,
+            nInterconnects=N//10, mu=0.7, sigma=2,
+            indices=regularIndices
+        )
         stim[0:10, 0] = 10
         majorGrouping = 'layer'
     elif initType == "connectome":
@@ -1624,8 +1977,14 @@ if __name__ == "__main__":
     history = cp2np(n.history)
     connections = cp2np(n.connections)
 
-    f, axs = plt.subplots(2, 2, sharex='col', sharey='row', gridspec_kw={'height_ratios': [3, 1]})
-    axs[0, 0].imshow(np.flip(history, axis=1), cmap='binary', interpolation='none') #, 'XData', np.arange(n.historyLength))
+    f, axs = plt.subplots(
+        2, 2, sharex='col', sharey='row',
+        gridspec_kw={'height_ratios': [3, 1]}
+    )
+    axs[0, 0].imshow(
+        np.flip(history, axis=1),
+        cmap='binary', interpolation='none'
+    )  #, 'XData', np.arange(n.historyLength))
     axs[0, 0].set_aspect('auto')
     # for k in range(n.numNeurons):
     #     plt.step(np.arange(n.historyLength), 5*n.history[k, :] + 10*k)
@@ -1653,12 +2012,24 @@ if __name__ == "__main__":
             groupIdx = n.filterByAttribute(majorGrouping, groupNum)
             if len(groupIdx) == 0:
                 continue
-            trace = 10*np.mean(np.flip(history[groupIdx, :], axis=1), axis=0) + (max(groupNums) - groupNum)*2
+            trace = (
+                10 * np.mean(
+                    np.flip(history[groupIdx, :], axis=1),
+                    axis=0
+                )
+                + (max(groupNums) - groupNum) * 2
+            )
             groupMaxFiringRate = trace.max()
             if groupMaxFiringRate > maxFiringRate:
                 maxFiringRate = groupMaxFiringRate
 
-            axs[1, 0].plot(10*np.mean(np.flip(history[groupIdx, :], axis=1), axis=0) + (max(groupNums) - groupNum)*2)
+            axs[1, 0].plot(
+                10 * np.mean(
+                    np.flip(history[groupIdx, :], axis=1),
+                    axis=0
+                )
+                + (max(groupNums) - groupNum) * 2
+            )
         axs[1, 0].title.set_text('Region-summed firing rate')
         axs[1, 0].set_ylim(0, maxFiringRate)
 
