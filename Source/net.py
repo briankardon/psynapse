@@ -147,7 +147,7 @@ class Net:
           """
 
         if name in self.attributeNames:
-            KeyError('Attribute "{n}" already exists.'.format(n=name))
+            raise KeyError('Attribute "{n}" already exists.'.format(n=name))
         if indices is None:
             indices = np.s_[:]
         self.attributeNames.append(name)
@@ -170,12 +170,12 @@ class Net:
 
         try:
             idx = self.attributeNames.index(name)
-        except ValueError():
+        except ValueError:
             raise KeyError('Attribute "{n}" does not exist.'.format(n=name))
         self.attributeNames.pop(idx)
         self.attributeMaps.pop(idx)
         self.attributeMapsReversed.pop(idx)
-        np.delete(self.attributeValues, idx, 0)
+        self.attributeValues = np.delete(self.attributeValues, idx, 0)
 
     def getAttributes(self, name, indices=None, mapped=False):
         """ Return an array of values corresponding to the selected attribute
@@ -201,7 +201,7 @@ class Net:
 
         try:
             idx = self.attributeNames.index(name)
-        except ValueError():
+        except ValueError:
             raise KeyError('Attribute "{n}" does not exist.'.format(n=name))
         if indices is None:
             indices = np.s_[:]
@@ -544,7 +544,7 @@ class Net:
 
         if attributeName is not None:
             attributeNameA = attributeName
-            attributenameB = attributeName
+            attributeNameB = attributeName
         if attributeNameB is None and attributeNameA is not None:
             attributeNameB = attributeNameA
         if attributeValueB is None:
@@ -627,7 +627,7 @@ class Net:
 
         if attributeName is not None:
             attributeNameA = attributeName
-            attributenameB = attributeName
+            attributeNameB = attributeName
         if attributeNameB is None and attributeNameA is not None:
             attributeNameB = attributeNameA
         if attributeValueB is None:
@@ -1204,10 +1204,10 @@ class Connectome:
         self.populations
         return dict(
             numPopulations = len(self.populations),
-            numNeurons = sum([pop.meanNumMutations for pop in self.populations]),
+            numNeurons = sum([pop.meanNumNeurons for pop in self.populations]),
             meanConnectionStrength = cp.mean([pop.meanConnectionStrength for pop in self.populations]),
             numProjections = sum([len(pop.connectedRegions) for pop in self.populations]),
-            fractionModulatory = sum([pop.meanNumMutations for pop in self.populations if pop.modulatory])/sum([pop.meanNumMutations for pop in self.populations]),
+            fractionModulatory = sum([pop.meanNumNeurons for pop in self.populations if pop.modulatory])/sum([pop.meanNumNeurons for pop in self.populations]),
             refractoryPeriod = cp.mean([pop.meanRefractoryPeriod for pop in self.populations]),
             threshold = cp.mean([pop.meanThreshold for pop in self.populations]),
             numConnections = sum([pop.meanNumConnections for pop in self.populations]),
@@ -1582,7 +1582,7 @@ class Neuron:
             activation = the activation level of this neuron
         '''
 
-        self.net.activations[self.index] = activation
+        return self.net.activations[self.index]
 
 if __name__ == "__main__":
     '''Code to run when this module is run directly, rather than imported
