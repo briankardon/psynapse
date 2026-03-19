@@ -622,6 +622,10 @@ class ConnectomeEvolver:
                 connectomes will be evaluated serially in a single process.
         '''
 
+        # Ensure savedir exists
+        saveDir = Path(saveDir);
+        saveDir.mkdir(parents=True, exist_ok=True);
+
         self.population = self.seeds
         genTimes = []
 
