@@ -364,13 +364,13 @@ class StackInteractor(BaseInteractor):
                 raise ValueError('Can only chain interactors, not objects of type {t}'.format(t=type(other)))
 
     def getTargets(self):
-        return self.interactors[self.interactorIdx].getTargets()
+        raise NotImplementedError("StackInteractor.getTargets is not yet implemented")
     def setTargets(self, newTargets):
-        self.interactors[self.interactorIdx].setTargets(newTargets)
+        raise NotImplementedError("StackInteractor.setTargets is not yet implemented")
     def getHistory(self):
-        return self.interactors[self.interactorIdx].getHistory()
+        raise NotImplementedError("StackInteractor.getHistory is not yet implemented")
     def scoreOutput(self):
-        return self.interactors[self.interactorIdx].scoreOutput()
+        raise NotImplementedError("StackInteractor.scoreOutput is not yet implemented")
 
 class FeedbackInteractor(BaseInteractor):
     '''This Interctor will stimulate using a sub-interactor, but will also
@@ -472,7 +472,7 @@ class ConnectomeEvolver:
         #   them as Connectome objects.
         self.seeds = []
         for seedConnectome in seedConnectomes:
-            if type(seedConnectome) == type(str()):
+            if isinstance(seedConnectome, str):
                 newConnectome = Connectome(seedConnectome)
             elif issubclass(type(seedConnectome), net.Connectome):
                 newConnectome = seedConnectome

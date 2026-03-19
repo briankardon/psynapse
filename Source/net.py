@@ -700,8 +700,10 @@ class Net:
         '''
 
         indices = self.getIndices(indices=indices, attributeName=attributeName, attributeValue=attributeValue)
-        self.thresholds[indices] = thresholds
-        self.baseThresholds[indices] = thresholds
+        if setCurrent:
+            self.thresholds[indices] = thresholds
+        if setBase:
+            self.baseThresholds[indices] = thresholds
 
     def setRefractoryPeriods(self, refractoryPeriods, indices=None, attributeName=None, attributeValue=None):
         '''Set the refractory periods of the specified neurons.
@@ -798,21 +800,20 @@ class Net:
         # Try to arrange neurons based on how they're connected? Maybe?
         pca = PCA(n_components=2)
         principalComponents = pca.fit_transform(self.connections)
+
+        def getRanges(data):
+            ((minX, maxX), (minY, maxY)) = self.getPositionRanges(data)
+            xRange = max(maxX - minX, 1)
+            yRange = max(maxY - minY, 1)
+            return minX, xRange, yRange
+
         # Get coordinate scales
-        ((minX, maxX), (minY, maxY)) = self.getPositionRanges(principalComponents)
-        xRange = maxX - minX
-        yRange = maxY - minY
-        xRange = 1 if xRange == 0 else xRange
-        yRange = 1 if yRange == 0 else yRange
+        _, xRange, yRange = getRanges(principalComponents)
         # Add jitter
         principalComponents[:, 0] = principalComponents[:, 0] + (xRange/20) * (np.random.rand(self.numNeurons)-0.5)
         principalComponents[:, 1] = principalComponents[:, 1] + (yRange/20) * (np.random.rand(self.numNeurons)-0.5)
         # Get new coordinate scales
-        ((minX, maxX), (minY, maxY)) = self.getPositionRanges(principalComponents)
-        xRange = maxX - minX
-        yRange = maxY - minY
-        xRange = 1 if xRange == 0 else xRange
-        yRange = 1 if yRange == 0 else yRange
+        minX, xRange, yRange = getRanges(principalComponents)
         # Scale coordinates to a standard range
         sRange = 100
         principalComponents[:, 1] = (sRange * (principalComponents[:, 1] - minX)/xRange)
@@ -875,8 +876,7 @@ class Net:
                     if distBetweenPoints == 0:
                         dirHat = np.array([0, 1])
                     else:
-                        dirHat= dir/np.linalg.norm(distBetweenPoints)
-                    dirHat = dir / np.linalg.norm(dir)
+                        dirHat = dir / distBetweenPoints
                     dir2Hat = dirHat.dot(Net.ROTATION)
                     sideOffset = markerRadius * dir2Hat
                     forwardOffset = markerRadius * dirHat
