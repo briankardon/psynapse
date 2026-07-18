@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>psynapse net viewer</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+<header>
+  <h1>psynapse</h1>
+  <nav class="tabs">
+    <button class="tab active" data-tab="net">Net</button>
+    <button class="tab" data-tab="connectome">Connectome</button>
+    <button class="tab" data-tab="evolution">Evolution</button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="stat">step <b id="stepCount">0</b></span>
+  <span class="stat">firing <b id="rate">0.0%</b></span>
+  <span class="stat hover" id="hover">&nbsp;</span>
+</header>
+
+<!-- ===== Net tab ===== -->
+<section id="tab-net" class="tab-panel active">
+  <div class="controls">
+    <button id="playBtn" class="primary">▶ Play</button>
+    <button id="stepBtn">Step</button>
+    <button id="resetBtn">Reset</button>
+    <label class="ctrl">Speed
+      <input id="speed" type="range" min="1" max="60" value="20">
+    </label>
+    <label class="ctrl">Steps/tick
+      <input id="burst" type="range" min="1" max="10" value="1">
+      <span id="burstVal">1</span>
+    </label>
+  </div>
+
+  <div class="toolbar">
+    <span class="group" id="sourceGroup">
+      <span class="label">Matrix</span>
+      <button class="seg active" data-source="weights">Weight</button>
+      <button class="seg" data-source="modWeights">Mod weight</button>
+      <button class="seg" data-source="plasticityWeights" disabled title="added in Step 3">Plasticity mod</button>
+    </span>
+    <span class="group" id="deltaGroup">
+      <span class="label">View</span>
+      <button class="seg active" data-delta="current">Current</button>
+      <button class="seg" data-delta="d1">Δ 1</button>
+      <button class="seg" data-delta="d5">Δ 5</button>
+      <button class="seg" data-delta="dall">Δ all</button>
+    </span>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="view"></canvas>
+  </div>
+</section>
+
+<!-- ===== Connectome tab (placeholder) ===== -->
+<section id="tab-connectome" class="tab-panel">
+  <div class="placeholder">
+    <h2>Connectome</h2>
+    <p>Planned: view the connectome that generated the current net, load / edit /
+    save connectome CSVs from disk, and generate or regenerate the net shown in
+    the Net tab.</p>
+  </div>
+</section>
+
+<!-- ===== Evolution tab (placeholder) ===== -->
+<section id="tab-evolution" class="tab-panel">
+  <div class="placeholder">
+    <h2>Evolution</h2>
+    <p>Planned: configure a task and evolution parameters, launch and monitor an
+    evolution run, and save / resume from a generation checkpoint.</p>
+  </div>
+</section>
+
+<script src="viewer.js"></script>
+</body>
+</html>
