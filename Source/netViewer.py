@@ -14,7 +14,7 @@ generated from a Connectome), but it gives the viewer something lively to
 show out of the box.
 
 Usage:
-    python netViewer.py [port]        # serve at http://localhost:<port> (default 8080)
+    python netViewer.py [port]        # serve at http://localhost:<port> (default 8137)
     python netViewer.py --selftest    # step the demo net headless and print stats
 """
 
@@ -461,16 +461,40 @@ def selftest(numSteps=200):
         nz=int(np.count_nonzero(weights)), lo=weights.min(), hi=weights.max()))
 
 
+DEFAULT_PORT = 8137
+
+
+def make_server(preferredPort):
+    """Bind the viewer server, falling back if the preferred port is taken.
+
+    A port already owned by another process surfaces on Windows as
+    PermissionError (WinError 10013) rather than the usual "address in use",
+    so we try the preferred port, then a couple of neighbours, then finally
+    an OS-assigned ephemeral port (0), which effectively always succeeds.
+    """
+    for port in (preferredPort, preferredPort + 1, preferredPort + 2, 0):
+        try:
+            return ThreadingHTTPServer(('127.0.0.1', port), ViewerHandler)
+        except OSError as err:
+            print('Port {p} unavailable ({e}); trying the next one...'.format(
+                p=port, e=err))
+    # Unreachable: binding to port 0 does not raise, but be explicit.
+    raise OSError('Could not bind the viewer to any port.')
+
+
 def main():
     if '--selftest' in sys.argv:
         selftest()
         return
-    port = 8080
+    port = DEFAULT_PORT
     for arg in sys.argv[1:]:
         if arg.isdigit():
             port = int(arg)
-    server = ThreadingHTTPServer(('127.0.0.1', port), ViewerHandler)
-    print('psynapse net viewer running at http://localhost:{p}/'.format(p=port))
+    server = make_server(port)
+    actualPort = server.server_address[1]
+    print('psynapse net viewer running at http://localhost:{p}/'.format(p=actualPort))
+    if actualPort != port:
+        print('(requested port {p} was unavailable)'.format(p=port))
     print('Press Ctrl+C to stop.')
     try:
         server.serve_forever()
