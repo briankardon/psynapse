@@ -20,11 +20,18 @@ if '--cpu' in sys.argv:
 else:
     try:
         import cupy as cp
+        # Probe the GPU before committing to it: cupy can import successfully
+        # even when the CUDA driver is too old to actually allocate memory
+        # (raising CUDARuntimeError only at first use). Force a tiny
+        # allocation here so that case degrades to numpy instead of crashing
+        # real work later.
+        cp.zeros(1)
         GPU = True
         cp2np = lambda x: cp.asnumpy(x)
-    except (ImportError, ModuleNotFoundError):
+    except Exception as err:
         warnings.warn(
-            "cupy not available, falling back to numpy (no GPU acceleration)",
+            "cupy/CUDA unavailable ({err}); falling back to numpy "
+            "(no GPU acceleration)".format(err=err),
             stacklevel=2
         )
         import numpy as cp
