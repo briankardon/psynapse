@@ -2,46 +2,39 @@
 /*
  * psynapse net viewer front-end.
  *
- * Everything is drawn onto ONE canvas so that the firing-rate histogram,
- * the spike raster, and the connection matrix share a single vertical
- * neuron-coordinate: row y === neuron ID across all three panels.
- *
- * Horizontal layout (left -> right):
- *     [ histogram ] [ raster (time ->, newest at right) ] [popbar] [ matrix ]
+ * The main view draws onto ONE canvas so the firing-rate histogram, spike
+ * raster, and connection matrix share a single vertical neuron-coordinate
+ * (row y === neuron ID). Layout, left -> right:
+ *     [ histogram ] [ raster (time ->) ] [popbar] [ matrix ] [ colour scale ]
  *
  * Matrix orientation: horizontal axis = upstream/presynaptic i (columns),
- * vertical axis = downstream/postsynaptic j (rows). Cell (col i, row j) is
- * the weight of synapse i -> j. Above the matrix sit a stimulation strip
- * and an upstream population-colour bar; a downstream population bar sits
- * just left of the matrix, aligned with the raster rows.
+ * vertical axis = downstream/postsynaptic j (rows); cell (i, j) = synapse
+ * i -> j. Clicking a row selects that neuron and opens the detail panel.
  */
 
 // ---- Layout configuration (CSS pixels) -------------------------------------
 const CFG = {
-  rowH: 8,          // px per neuron (shared vertical scale for all panels)
-  matrixCell: 8,    // px per matrix column (== rowH keeps rows aligned)
-  rasterColW: 2,    // px per time step
-  rasterWidth: 240, // time steps shown
-  histW: 80,        // firing-rate histogram width
-  popBar: 10,       // downstream population bar thickness
-  popBarTopH: 8,    // upstream population bar thickness
-  stimH: 12,        // stimulation strip height
-  gap: 12,          // gap between panels
-  labelH: 16,       // label band top and bottom
-  ringLen: 8,       // weight-history depth (for Δ views)
+  rowH: 8, matrixCell: 8, rasterColW: 2, rasterWidth: 240,
+  histW: 80, popBar: 10, popBarTopH: 8, stimH: 12,
+  gap: 12, labelH: 16, ringLen: 8,
+  scaleBarW: 14, scaleGap: 14,
 };
-
+const DONUT = 132;  // logical size of each detail donut canvas (px)
 const REGION_COLORS = ['#4cc2ff', '#7ee787', '#ff7b72', '#d2a8ff', '#ffa657', '#79c0ff'];
 
 // ---- State -----------------------------------------------------------------
-let meta = null;                       // {numNeurons, regionIDs, regionNames}
-let rasterCols = [];                   // Uint8Array(N) per step, newest last
-let rateWindow = [];                   // recent firing columns for rolling rate
-let latestInput = null;                // current external-input vector
-const base = {};                       // {source: matrix} snapshot at load
-const ring = { weights: [], modWeights: [] };  // recent matrices for Δ views
-const latest = {};                     // {source: current matrix}
-let colorScale = 1;                    // smoothed colour normalization
+let meta = null;
+let rasterCols = [];
+let rateWindow = [];
+let latestInput = null;
+let latestThresholds = null;
+let latestFiring = null;               // most recent firing vector (0/1)
+let selected = null;                   // selected neuron ID, or null
+let lastTableSel = null;
+const base = {};
+const ring = { weights: [], modWeights: [] };
+const latest = {};
+let colorScale = 1;
 
 let viewSource = 'weights';
 let deltaMode = 'current';
@@ -54,7 +47,6 @@ const canvas = $('view');
 const ctx = canvas.getContext('2d');
 
 // ---- Geometry --------------------------------------------------------------
-// Computed from CFG + neuron count; all panels reference these.
 let L = null;
 function layout() {
   const N = meta.numNeurons;
@@ -66,31 +58,29 @@ function layout() {
   const matrixX = popLeftX + CFG.popBar + 2;
   const matrixW = N * CFG.matrixCell;
   const gridH = N * CFG.rowH;
+  const scaleBarX = matrixX + matrixW + CFG.scaleGap;
   L = {
-    N, rowsY, histX, rasterX, rasterW, popLeftX, matrixX, matrixW, gridH,
-    width: matrixX + matrixW + 2,
+    N, rowsY, histX, rasterX, rasterW, popLeftX, matrixX, matrixW, gridH, scaleBarX,
+    width: scaleBarX + CFG.scaleBarW + 48,
     height: rowsY + gridH + CFG.labelH,
-    stimY: CFG.labelH,
-    popTopY: CFG.labelH + CFG.stimH + 2,
+    stimY: CFG.labelH, popTopY: CFG.labelH + CFG.stimH + 2,
   };
 }
 const rowY = j => L.rowsY + j * CFG.rowH;
 const colX = i => L.matrixX + i * CFG.matrixCell;
-function regionColor(neuron) {
-  return REGION_COLORS[meta.regionIDs[neuron] % REGION_COLORS.length];
-}
+const regionColor = neuron => REGION_COLORS[meta.regionIDs[neuron] % REGION_COLORS.length];
+const regionName = neuron => meta.regionNames[meta.regionIDs[neuron]];
 
 // ---- Small helpers ---------------------------------------------------------
 function hexRGB(hex) {
   return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
 }
-// Diverging map: negative -> blue, 0 -> dark, positive -> orange. v in [-1,1].
 function diverging(v) {
   if (v > 0) { v = Math.min(v, 1); return [20 + 227 * v, 26 + 93 * v, 34 - 34 * v]; }
   if (v < 0) { v = Math.min(-v, 1); return [20 + 27 * v, 26 + 103 * v, 34 + 213 * v]; }
   return [20, 26, 34];
 }
-// Build an offscreen canvas (cols x rows) from a per-pixel colour function.
+const rgb = c => 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
 function pixelCanvas(cols, rows, colorFn) {
   const off = document.createElement('canvas');
   off.width = cols; off.height = rows;
@@ -126,11 +116,10 @@ function shownMatrix() {
   if (deltaMode === 'dall') ref = base[viewSource];
   else if (deltaMode === 'd1') ref = hist[hist.length - 2];
   else if (deltaMode === 'd5') ref = hist[Math.max(0, hist.length - 6)];
-  if (!ref) return null;
-  return subtract(cur, ref);
+  return ref ? subtract(cur, ref) : null;
 }
 
-// ---- Drawing ---------------------------------------------------------------
+// ---- Main-view drawing -----------------------------------------------------
 function draw() {
   if (!meta) return;
   layout();
@@ -141,7 +130,6 @@ function draw() {
   canvas.height = Math.round(L.height * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, L.width, L.height);
-  ctx.textBaseline = 'alphabetic';
   ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
 
   drawLabels();
@@ -150,10 +138,13 @@ function draw() {
   drawPopBars();
   drawStimStrip();
   drawMatrix();
+  drawScaleBar();
+  drawSelection();
+  updateDetail();
 }
 
 function drawLabels() {
-  ctx.fillStyle = '#8b949e';
+  ctx.fillStyle = '#8b949e'; ctx.textAlign = 'left';
   ctx.fillText('rate', L.histX, CFG.labelH - 4);
   ctx.fillText('spike raster  (time →)', L.rasterX, CFG.labelH - 4);
   ctx.fillText('synapse matrix  (upstream i →, downstream j ↓)', L.matrixX, CFG.labelH - 4);
@@ -164,23 +155,20 @@ function drawHistogram() {
   if (rateWindow.length === 0) return;
   const rates = new Float32Array(N);
   for (const col of rateWindow) for (let j = 0; j < N; j++) rates[j] += col[j];
-  for (let j = 0; j < N; j++) rates[j] /= rateWindow.length;
   for (let j = 0; j < N; j++) {
     ctx.fillStyle = regionColor(j);
-    const w = Math.max(0.5, rates[j] * CFG.histW);
+    const w = Math.max(0.5, (rates[j] / rateWindow.length) * CFG.histW);
     ctx.fillRect(L.histX + CFG.histW - w, rowY(j), w, Math.max(1, CFG.rowH - 1));
   }
 }
 
 function drawRaster() {
-  const N = meta.numNeurons;
-  const cols = CFG.rasterWidth;
-  const startCol = cols - rasterCols.length;  // left-pad when history < width
+  const N = meta.numNeurons, cols = CFG.rasterWidth;
+  const startCol = cols - rasterCols.length;
   const off = pixelCanvas(cols, N, (x, y) => {
     const ci = x - startCol;
     if (ci < 0 || ci >= rasterCols.length) return [12, 15, 20];
-    if (rasterCols[ci][y]) return hexRGB(regionColor(y));
-    return [12, 15, 20];
+    return rasterCols[ci][y] ? hexRGB(regionColor(y)) : [12, 15, 20];
   });
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(off, L.rasterX, L.rowsY, L.rasterW, L.gridH);
@@ -188,16 +176,8 @@ function drawRaster() {
 
 function drawPopBars() {
   const N = meta.numNeurons;
-  // Downstream population bar (vertical), left of matrix, aligned to rows.
-  for (let j = 0; j < N; j++) {
-    ctx.fillStyle = regionColor(j);
-    ctx.fillRect(L.popLeftX, rowY(j), CFG.popBar, CFG.rowH);
-  }
-  // Upstream population bar (horizontal), above matrix, aligned to columns.
-  for (let i = 0; i < N; i++) {
-    ctx.fillStyle = regionColor(i);
-    ctx.fillRect(colX(i), L.popTopY, CFG.matrixCell, CFG.popBarTopH);
-  }
+  for (let j = 0; j < N; j++) { ctx.fillStyle = regionColor(j); ctx.fillRect(L.popLeftX, rowY(j), CFG.popBar, CFG.rowH); }
+  for (let i = 0; i < N; i++) { ctx.fillStyle = regionColor(i); ctx.fillRect(colX(i), L.popTopY, CFG.matrixCell, CFG.popBarTopH); }
 }
 
 function drawStimStrip() {
@@ -217,32 +197,178 @@ function drawStimStrip() {
 }
 
 function drawMatrix() {
-  const M = shownMatrix();
-  const N = meta.numNeurons;
+  const M = shownMatrix(), N = meta.numNeurons;
   if (!M) {
-    ctx.fillStyle = '#8b949e';
+    ctx.fillStyle = '#8b949e'; ctx.textAlign = 'left';
     ctx.fillText('(no data for this view yet)', L.matrixX, L.rowsY + 14);
     return;
   }
-  // Normalize by a smoothed max-abs so the colours don't flicker.
   let maxAbs = 0;
   for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) maxAbs = Math.max(maxAbs, Math.abs(M[i][j]));
   colorScale = Math.max(colorScale * 0.9, maxAbs, 1e-6);
-  // Pixel (px=i upstream=column, py=j downstream=row) shows synapse i -> j.
-  const off = pixelCanvas(N, N, (px, py) => diverging(M[px][py] / colorScale));
+  const off = pixelCanvas(N, N, (px, py) => diverging(M[px][py] / colorScale));  // px=i upstream, py=j downstream
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(off, L.matrixX, L.rowsY, L.matrixW, L.gridH);
+}
+
+function drawScaleBar() {
+  const x = L.scaleBarX, w = CFG.scaleBarW, y = L.rowsY, h = L.gridH, steps = 100;
+  for (let k = 0; k < steps; k++) {
+    ctx.fillStyle = rgb(diverging(1 - 2 * k / steps));
+    ctx.fillRect(x, y + h * k / steps, w, h / steps + 1);
+  }
+  ctx.strokeStyle = '#2a313c'; ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+  ctx.fillStyle = '#8b949e'; ctx.textAlign = 'left';
+  const lab = colorScale >= 100 ? colorScale.toFixed(0) : colorScale.toPrecision(2);
+  ctx.fillText('+' + lab, x + w + 4, y + 8);
+  ctx.fillText('0', x + w + 4, y + h / 2 + 3);
+  ctx.fillText('−' + lab, x + w + 4, y + h);
+  const src = viewSource === 'weights' ? 'weight' : viewSource === 'modWeights' ? 'mod wt' : 'plast';
+  ctx.fillText(src + (deltaMode === 'current' ? '' : ' Δ'), x - 2, y - 4);
+}
+
+function drawSelection() {
+  if (selected === null) return;
+  const j = selected;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1;
+  ctx.strokeRect(L.histX - 0.5, rowY(j) - 0.5, (L.matrixX + L.matrixW) - L.histX + 1, CFG.rowH + 1);
+  ctx.strokeRect(colX(j) - 0.5, L.rowsY - 0.5, CFG.matrixCell + 1, L.gridH + 1);  // column j = its outputs
+  ctx.restore();
+}
+
+// ---- Neuron detail panel ---------------------------------------------------
+function getInputs(j) {
+  const out = [], W = latest.weights;
+  for (let i = 0; i < meta.numNeurons; i++) {
+    const w = W[i][j];
+    if (w !== 0) out.push({ n: i, w, region: meta.regionIDs[i], firing: latestFiring && latestFiring[i] });
+  }
+  return out;
+}
+function getOutputs(j) {
+  const out = [], W = latest.weights;
+  for (let k = 0; k < meta.numNeurons; k++) {
+    const w = W[j][k];
+    if (w !== 0) out.push({ n: k, w, region: meta.regionIDs[k], firing: latestFiring && latestFiring[k] });
+  }
+  return out;
+}
+
+function prepDonut(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = DONUT * dpr; cv.height = DONUT * dpr;
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, DONUT, DONUT);
+  return c;
+}
+function wedge(c, cx, cy, rIn, rOut, a0, a1) {
+  c.beginPath();
+  c.arc(cx, cy, rOut, a0, a1);
+  c.arc(cx, cy, rIn, a1, a0, true);
+  c.closePath();
+}
+// Draw a donut of synapses. Slice size ∝ |weight|; sign shown by colour.
+function drawDonut(cv, syns, opts) {
+  const c = prepDonut(cv), cx = DONUT / 2, cy = DONUT / 2;
+  const rOut = DONUT * 0.46, rIn = DONUT * 0.30;
+  const gOut = DONUT * 0.275, gIn = DONUT * 0.215, centerR = DONUT * 0.185;
+  let total = 0;
+  for (const s of syns) total += Math.abs(s.w);
+
+  let a = -Math.PI / 2;
+  for (const s of syns) {
+    if (total === 0) break;
+    const sweep = 2 * Math.PI * Math.abs(s.w) / total;
+    wedge(c, cx, cy, rIn, rOut, a, a + sweep);
+    c.fillStyle = REGION_COLORS[s.region % REGION_COLORS.length];
+    c.fill();
+    if (s.w < 0) { c.fillStyle = 'rgba(20,40,120,0.5)'; c.fill(); }  // inhibitory: cool wash
+    if (s.firing) { c.strokeStyle = 'rgba(255,255,255,0.9)'; c.lineWidth = 2; c.stroke(); }
+    a += sweep;
+  }
+  if (total === 0) {
+    c.strokeStyle = '#2a313c'; c.lineWidth = 1;
+    wedge(c, cx, cy, rIn, rOut, 0, 2 * Math.PI); c.stroke();
+  }
+
+  // Inner gauge annulus (inputs only): drive swept 0->360, threshold tick.
+  if (opts.gauge) {
+    let maxDrive = 0, activation = 0;
+    for (const s of syns) { if (s.w > 0) maxDrive += s.w; if (s.firing) activation += s.w; }
+    c.strokeStyle = '#20262e'; c.lineWidth = gOut - gIn;
+    c.beginPath(); c.arc(cx, cy, (gOut + gIn) / 2, 0, 2 * Math.PI); c.stroke();
+    if (maxDrive > 0) {
+      const frac = Math.max(0, Math.min(1, activation / maxDrive));
+      c.strokeStyle = '#4cc2ff';
+      c.beginPath(); c.arc(cx, cy, (gOut + gIn) / 2, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * frac); c.stroke();
+      const tFrac = Math.max(0, Math.min(1, opts.thr / maxDrive));
+      const ta = -Math.PI / 2 + 2 * Math.PI * tFrac;
+      c.strokeStyle = '#ff7b72'; c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(cx + gIn * Math.cos(ta), cy + gIn * Math.sin(ta));
+      c.lineTo(cx + gOut * Math.cos(ta), cy + gOut * Math.sin(ta));
+      c.stroke();
+    }
+  }
+
+  // Center: lights up when the neuron itself fires.
+  c.beginPath(); c.arc(cx, cy, centerR, 0, 2 * Math.PI);
+  c.fillStyle = opts.fireSelf ? '#ffd666' : '#141a22'; c.fill();
+  c.fillStyle = opts.fireSelf ? '#3d2f00' : '#8b949e';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = '11px ui-sans-serif, system-ui, sans-serif';
+  c.fillText('' + (selected === null ? '' : selected), cx, cy);
+  c.textBaseline = 'alphabetic';
+}
+
+function buildTable(rows, kind) {
+  rows = rows.slice().sort((a, b) => Math.abs(b.w) - Math.abs(a.w));
+  const head = kind === 'in'
+    ? '<tr><th>pre</th><th>pop</th><th>weight</th><th>fire</th></tr>'
+    : '<tr><th>post</th><th>pop</th><th>weight</th></tr>';
+  let body = '';
+  for (const s of rows) {
+    const dot = '<span class="dot" style="background:' + REGION_COLORS[s.region % REGION_COLORS.length] + '"></span> ';
+    const pop = dot + meta.regionNames[s.region];
+    if (kind === 'in')
+      body += '<tr><td>' + s.n + '</td><td>' + pop + '</td><td>' + s.w.toFixed(2) + '</td><td>' + (s.firing ? '●' : '') + '</td></tr>';
+    else
+      body += '<tr><td>' + s.n + '</td><td>' + pop + '</td><td>' + s.w.toFixed(2) + '</td></tr>';
+  }
+  const cap = kind === 'in' ? 'inputs (' + rows.length + ')' : 'outputs (' + rows.length + ')';
+  return '<table><caption>' + cap + '</caption>' + head + body + '</table>';
+}
+
+function updateDetail() {
+  const panel = $('detail');
+  if (selected === null) { panel.classList.add('hidden'); lastTableSel = null; return; }
+  panel.classList.remove('hidden');
+  const swatch = '<span class="dot" style="background:' + regionColor(selected) + '"></span> ';
+  $('detailTitle').innerHTML = 'Neuron ' + selected + ' · ' + swatch + regionName(selected);
+  const inputs = getInputs(selected), outputs = getOutputs(selected);
+  drawDonut($('donutIn'), inputs, { gauge: true, thr: latestThresholds ? latestThresholds[selected] : 0, fireSelf: latestFiring && latestFiring[selected] });
+  drawDonut($('donutOut'), outputs, { gauge: false, fireSelf: latestFiring && latestFiring[selected] });
+  if (selected !== lastTableSel) {   // weights drift slowly; rebuild tables on selection change
+    $('inputTable').innerHTML = buildTable(inputs, 'in');
+    $('outputTable').innerHTML = buildTable(outputs, 'out');
+    lastTableSel = selected;
+  }
 }
 
 // ---- Data flow -------------------------------------------------------------
 async function loadInit() {
   meta = await (await fetch('/api/init')).json();
   rasterCols = []; rateWindow = []; latestInput = null;
+  latestThresholds = meta.thresholds;
+  latestFiring = new Uint8Array(meta.numNeurons);
   ring.weights = []; ring.modWeights = [];
   base.weights = meta.weights; base.modWeights = meta.modWeights;
   latest.weights = meta.weights; latest.modWeights = meta.modWeights;
   latest.plasticityWeights = null; base.plasticityWeights = null;
-  colorScale = 1;
+  colorScale = 1; lastTableSel = null;
+  if (selected !== null && selected >= meta.numNeurons) selected = null;
   $('stepCount').textContent = meta.step;
   draw();
 }
@@ -262,20 +388,20 @@ async function doStep(n) {
     if (rasterCols.length > CFG.rasterWidth) rasterCols.shift();
     rateWindow.push(arr);
     if (rateWindow.length > 60) rateWindow.shift();
+    latestFiring = arr;
   }
   latestInput = res.inputColumns[res.inputColumns.length - 1];
+  latestThresholds = res.thresholds;
   pushMatrix('weights', res.weights);
   pushMatrix('modWeights', res.modWeights);
   $('stepCount').textContent = res.step;
   const last = rasterCols[rasterCols.length - 1];
-  const frac = last.reduce((a, b) => a + b, 0) / last.length;
-  $('rate').textContent = (frac * 100).toFixed(1) + '%';
+  $('rate').textContent = (last.reduce((a, b) => a + b, 0) / last.length * 100).toFixed(1) + '%';
   draw();
 }
 
 // ---- Transport + view controls ---------------------------------------------
 function tick() { doStep(parseInt($('burst').value, 10)); }
-
 function setPlaying(on) {
   playing = on;
   $('playBtn').textContent = on ? '❚❚ Pause' : '▶ Play';
@@ -283,7 +409,6 @@ function setPlaying(on) {
   if (timer) { clearInterval(timer); timer = null; }
   if (on) timer = setInterval(tick, 1000 / parseInt($('speed').value, 10));
 }
-
 $('playBtn').onclick = () => setPlaying(!playing);
 $('stepBtn').onclick = () => { setPlaying(false); tick(); };
 $('resetBtn').onclick = async () => { setPlaying(false); await loadInit(); };
@@ -297,9 +422,7 @@ function wireSegGroup(groupId, attr, apply) {
       if (btn.disabled) return;
       group.querySelectorAll('.seg').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      apply(btn.dataset[attr]);
-      colorScale = 1;
-      draw();
+      apply(btn.dataset[attr]); colorScale = 1; draw();
     };
   });
 }
@@ -318,24 +441,34 @@ document.querySelectorAll('.tab').forEach(tab => {
   };
 });
 
-// ---- Hover read-out --------------------------------------------------------
+// ---- Selection + hover -----------------------------------------------------
+function neuronAt(ev) {
+  const r = canvas.getBoundingClientRect();
+  const y = ev.clientY - r.top;
+  const j = Math.floor((y - L.rowsY) / CFG.rowH);
+  return (j >= 0 && j < meta.numNeurons) ? j : null;
+}
+canvas.onclick = ev => {
+  if (!meta) return;
+  const j = neuronAt(ev);
+  if (j !== null) { selected = j; draw(); }
+};
 canvas.onmousemove = ev => {
   if (!meta) return;
   const r = canvas.getBoundingClientRect();
-  const x = ev.clientX - r.left, y = ev.clientY - r.top;
-  const j = Math.floor((y - L.rowsY) / CFG.rowH);
-  if (j < 0 || j >= meta.numNeurons) { setHover(''); return; }
+  const x = ev.clientX - r.left, j = neuronAt(ev);
+  if (j === null) { setHover(''); return; }
   if (x >= L.matrixX && x < L.matrixX + L.matrixW) {
     const i = Math.floor((x - L.matrixX) / CFG.matrixCell);
-    const M = shownMatrix();
-    const val = M ? M[i][j] : NaN;
+    const M = shownMatrix(); const val = M ? M[i][j] : NaN;
     setHover('syn ' + i + '→' + j + ' = ' + (isNaN(val) ? '—' : val.toFixed(3)));
   } else {
-    setHover('neuron ' + j + ' (' + meta.regionNames[meta.regionIDs[j]] + ')');
+    setHover('neuron ' + j + ' (' + regionName(j) + ')');
   }
 };
 canvas.onmouseleave = () => setHover('');
-function setHover(t) { if (t !== hoverText) { hoverText = t; $('hover').textContent = t || ' '; } }
+function setHover(t) { if (t !== hoverText) { hoverText = t; $('hover').textContent = t || ' '; } }
+$('detailClose').onclick = () => { selected = null; draw(); };
 
 window.addEventListener('resize', () => { if (meta) draw(); });
 loadInit();

@@ -51,8 +51,22 @@
     </span>
   </div>
 
-  <div class="canvas-wrap">
-    <canvas id="view"></canvas>
+  <div class="net-layout">
+    <div class="canvas-wrap">
+      <canvas id="view"></canvas>
+    </div>
+    <aside id="detail" class="detail hidden">
+      <div class="detail-head">
+        <span id="detailTitle">Neuron</span>
+        <button id="detailClose" class="close" title="close">×</button>
+      </div>
+      <div class="donuts">
+        <figure><figcaption>inputs</figcaption><canvas id="donutIn"></canvas></figure>
+        <figure><figcaption>outputs</figcaption><canvas id="donutOut"></canvas></figure>
+      </div>
+      <div id="inputTable" class="syn-table"></div>
+      <div id="outputTable" class="syn-table"></div>
+    </aside>
   </div>
 </section>
 

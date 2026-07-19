@@ -132,6 +132,7 @@ class Simulation:
                 step=self.stepCount,
                 weights=_to_list(self.net.connections),
                 modWeights=_to_list(self.net.modConnections),
+                thresholds=_to_list(self.net.thresholds),
             )
 
     def step(self, numSteps):

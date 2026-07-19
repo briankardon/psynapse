@@ -56,8 +56,36 @@ input[type=range] { accent-color: var(--accent); }
 .seg:last-of-type { border-radius: 0 6px 6px 0; }
 .seg.active { background: var(--accent); color: #04121c; border-color: var(--accent); font-weight: 600; }
 
-.canvas-wrap { overflow-x: auto; }
-canvas { display: block; background: #0a0d12; border-radius: 4px; image-rendering: pixelated; }
+.net-layout { display: flex; gap: 14px; align-items: flex-start; }
+.canvas-wrap { overflow-x: auto; flex: 1; min-width: 0; }
+#view { image-rendering: pixelated; }
+canvas { display: block; background: #0a0d12; border-radius: 4px; }
+
+/* Neuron detail side-panel */
+.detail {
+  width: 300px; flex: 0 0 300px; background: var(--panel);
+  border: 1px solid var(--edge); border-radius: 8px; padding: 12px;
+}
+.detail.hidden { display: none; }
+.detail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+#detailTitle { font-weight: 600; }
+.close { padding: 2px 9px; line-height: 1; }
+.donuts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.donuts figure { margin: 0; text-align: center; }
+.donuts figcaption {
+  color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+}
+.donuts canvas { width: 132px; height: 132px; background: transparent; }
+.syn-table { margin-top: 10px; max-height: 160px; overflow-y: auto; font-size: 12px; }
+.syn-table table { width: 100%; border-collapse: collapse; }
+.syn-table caption {
+  text-align: left; color: var(--muted); text-transform: uppercase;
+  font-size: 11px; letter-spacing: .5px; padding: 4px 0;
+}
+.syn-table th, .syn-table td { text-align: right; padding: 1px 6px; font-variant-numeric: tabular-nums; }
+.syn-table th:first-child, .syn-table td:first-child { text-align: left; }
+.syn-table th { color: var(--muted); font-weight: 500; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; vertical-align: middle; }
 
 .placeholder { max-width: 60ch; color: var(--muted); }
 .placeholder h2 { color: var(--text); font-size: 16px; margin: 4px 0 8px; }
